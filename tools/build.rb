@@ -1,5 +1,5 @@
 # encoding: UTF-8
-# Empacota a extensão em dist/detalhamento_pm-<versão>.rbz
+# Empacota a extensão em dist/A3-Detailer-<versão>.rbz
 # Uso: ruby tools/build.rb
 require 'fileutils'
 
@@ -10,7 +10,7 @@ versao = carregador[/ext\.version\s*=\s*'([^']+)'/, 1] or abort('Versão não en
 
 dist = File.join(raiz, 'dist')
 FileUtils.mkdir_p(dist)
-destino = File.join(dist, "detalhamento_pm-#{versao}.rbz")
+destino = File.join(dist, "A3-Detailer-#{versao}.rbz")
 FileUtils.rm_f(destino)
 
 Dir.chdir(src) do

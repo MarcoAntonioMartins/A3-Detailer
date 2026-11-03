@@ -1,5 +1,5 @@
 # encoding: UTF-8
-# Detalhamento Pré-moldado - integração com o SketchUp.
+# A3-Detailer - integração com o SketchUp.
 # Lê as peças do modelo, agrupa as iguais e gera uma prancha A3 de formas
 # (DXF) para cada tipo de peça.
 require 'sketchup.rb'
@@ -275,7 +275,7 @@ module DetalhamentoPM
           feitas << "#{t[:nome]}: #{arqs.join(', ')}  (vistas 1:#{pr.escala_vistas})"
         rescue StandardError => e
           erros << "#{t[:nome]}: #{e.message}"
-          puts "[Detalhamento PM] #{t[:nome]}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+          puts "[A3-Detailer] #{t[:nome]}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
         end
       end
       if unico && !feitas.empty?
@@ -319,7 +319,7 @@ module DetalhamentoPM
 
     # ------------------------------------------------------------ menus
     unless file_loaded?(__FILE__)
-      m = UI.menu('Extensions').add_submenu('Detalhamento Pré-moldado')
+      m = UI.menu('Extensions').add_submenu('A3-Detailer')
       m.add_item('Gerar pranchas A3 (todas as peças)...') { gerar_pranchas(false) }
       m.add_item('Gerar prancha das peças selecionadas...') { gerar_pranchas(true) }
       m.add_separator

@@ -3,6 +3,13 @@
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.3.1] - 2026-11-02
+### Alterado
+- Projeto renomeado para **A3-Detailer**: nome no Gerenciador de extensões,
+  menu do SketchUp, README e arquivo `.rbz` (`A3-Detailer-<versão>.rbz`).
+- O nome interno (pasta `detalhamento_pm` e módulo `DetalhamentoPM`) foi mantido,
+  para que quem já instalou a versão anterior atualize sem duplicar a extensão.
+
 ## [0.3.0] - 2026-11-02
 ### Adicionado
 - Saída em **PDF vetorial A3** gerada pelo próprio plugin (sem AutoCAD).

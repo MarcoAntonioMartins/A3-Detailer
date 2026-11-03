@@ -1,4 +1,6 @@
-# Detalhamento Pré-moldado para SketchUp
+# A3-Detailer
+
+**Detalhamento de peças pré-moldadas para SketchUp**
 
 Extensão para SketchUp que lê as peças de concreto pré-moldado de um modelo 3D
 (pilares, vigas, placas, lajes, tesouras, blocos…) e gera automaticamente a
@@ -37,7 +39,7 @@ outro programa ou biblioteca.
 
 ## Como usar
 
-No menu **Extensões › Detalhamento Pré-moldado**:
+No menu **Extensões › A3-Detailer**:
 
 | Comando | O que faz |
 |---|---|
@@ -96,9 +98,13 @@ src/
     pdf.rb                    gravador de PDF vetorial
     dxf.rb                    gravador de DXF R12
 test/                         testes que rodam fora do SketchUp (API simulada)
-tools/build.rb                gera dist/detalhamento_pm-<versão>.rbz
+tools/build.rb                gera dist/A3-Detailer-<versão>.rbz
 tools/visualizar_dxf.py       gera PNG de um DXF para conferência (opcional)
 ```
+
+O nome interno da extensão (pasta `detalhamento_pm` e módulo `DetalhamentoPM`)
+é mantido entre as versões, para que as atualizações substituam a versão
+instalada em vez de criar uma cópia.
 
 `geom.rb`, `prancha.rb`, `pdf.rb` e `dxf.rb` são Ruby puro: não dependem do
 SketchUp e podem ser testados em qualquer computador.
