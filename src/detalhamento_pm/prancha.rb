@@ -29,7 +29,6 @@ module DetalhamentoPM
     def initialize(peca, cfg)
       @p = peca
       @c = cfg
-      @d = DXF.new(cfg[:fonte] || 'romans.shx')
       preparar
     end
 
@@ -39,7 +38,21 @@ module DetalhamentoPM
             .gsub(%r{[\\/:*?"<>|]}, '_')
     end
 
+    # Atalho: grava a prancha num arquivo .dxf ou .pdf.
     def gerar(caminho)
+      if caminho.downcase.end_with?('.pdf')
+        g = PDF.new
+        g.nova_pagina
+      else
+        g = DXF.new(@c[:fonte] || 'romans.shx')
+      end
+      desenhar(g)
+      g.salvar(caminho)
+    end
+
+    # Desenha a prancha num gravador (DXF, página de PDF ou Saidas).
+    def desenhar(saida)
+      @d = saida
       folha
       y_dir = carimbo_e_tabelas
       @cortes = calcular_cortes
@@ -61,8 +74,7 @@ module DetalhamentoPM
       end
       vistas(FX0 + 17, vx1, y_dir + 3, FY1 - 2)
       desenhar_cortes(FX0 + 3, cx1, FY0 + 3, y_dir - 1)
-      @d.salvar(caminho)
-      caminho
+      self
     end
 
     # ------------------------------------------------------------ preparo

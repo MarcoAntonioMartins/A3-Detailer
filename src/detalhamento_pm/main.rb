@@ -7,15 +7,20 @@ require 'sketchup.rb'
 dir = File.dirname(__FILE__)
 require File.join(dir, 'geom')
 require File.join(dir, 'dxf')
+require File.join(dir, 'pdf')
 require File.join(dir, 'prancha')
 
 module DetalhamentoPM
   module Core
     PREF = 'DetalhamentoPM'.freeze
 
+    FORMATOS = ['PDF (um arquivo por peça)', 'PDF único (todas as peças)',
+                'PDF e DXF', 'DXF'].freeze
+
     CAMPOS = [
       # chave, rótulo, padrão
-      ['tags',     'Tags a detalhar (separe com vírgula; vazio = todas)',
+      ['formato',  'Formato de saída', FORMATOS[0]],
+      ['tags',    'Tags a detalhar (separe com vírgula; vazio = todas)',
        'Bloco,Pilares,Consoles,Placas,Vigas,Lajes,Tesouras'],
       ['insertos', 'Palavras que identificam insertos',
        'insert,neoprene,alça,alca,chapa,içamento,icamento'],
@@ -48,7 +53,9 @@ module DetalhamentoPM
 
     def self.configurar(titulo)
       v = valores
-      r = UI.inputbox(CAMPOS.map { |c| c[1] }, CAMPOS.map { |c| v[c[0]] }, titulo)
+      v['formato'] = FORMATOS[0] unless FORMATOS.include?(v['formato'])
+      listas = CAMPOS.map { |c| c[0] == 'formato' ? FORMATOS.join('|') : '' }
+      r = UI.inputbox(CAMPOS.map { |c| c[1] }, CAMPOS.map { |c| v[c[0]] }, listas, titulo)
       return nil unless r
       CAMPOS.each_with_index { |c, i| Sketchup.write_default(PREF, c[0], r[i].to_s) }
       cfg_prancha
@@ -57,6 +64,7 @@ module DetalhamentoPM
     def self.cfg_prancha
       v = valores
       {
+        formato: FORMATOS.index(v['formato']) || 0,
         tags: v['tags'].split(',').map { |s| s.strip.downcase }.reject(&:empty?),
         insertos: v['insertos'].split(',').map { |s| s.strip.downcase }.reject(&:empty?),
         obra: v['obra'], local: v['local'], prefixo: v['prefixo'],
@@ -210,25 +218,12 @@ module DetalhamentoPM
                       'ou se as peças são componentes/grupos.')
         return
       end
-      pasta = UI.select_directory(title: 'Pasta onde salvar as pranchas (DXF)')
+      pasta = UI.select_directory(title: 'Pasta onde salvar as pranchas')
       return unless pasta
 
       Sketchup.status_text = 'Lendo as peças...'
       tipos = agrupar(pecas, cfg)
-      feitas = []
-      erros = []
-      tipos.each_with_index do |t, k|
-        Sketchup.status_text = "Gerando prancha #{k + 1}/#{tipos.size}: #{t[:nome]}"
-        begin
-          pr = Prancha.new(t, cfg)
-          caminho = File.join(pasta, pr.nome_arquivo + '.dxf')
-          pr.gerar(caminho)
-          feitas << "#{File.basename(caminho)}  (vistas 1:#{pr.escala_vistas})"
-        rescue StandardError => e
-          erros << "#{t[:nome]}: #{e.message}"
-          puts "[Detalhamento PM] #{t[:nome]}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
-        end
-      end
+      feitas, erros = gerar_arquivos(tipos, cfg, pasta)
       Sketchup.status_text = ''
 
       msg = "#{feitas.size} prancha(s) gerada(s) em:\n#{pasta}\n\n"
@@ -239,6 +234,57 @@ module DetalhamentoPM
       if UI.messagebox(msg, MB_YESNO) == IDYES
         UI.openURL('file:///' + pasta.tr('\\', '/'))
       end
+    end
+
+    # Gera os arquivos no formato escolhido. Devolve [feitas, erros].
+    # formato: 0 = PDF por peça, 1 = PDF único, 2 = PDF e DXF, 3 = DXF
+    def self.gerar_arquivos(tipos, cfg, pasta)
+      f = cfg[:formato]
+      feitas = []
+      erros = []
+      unico = f == 1 ? PDF.new : nil
+      tipos.each_with_index do |t, k|
+        Sketchup.status_text = "Gerando prancha #{k + 1}/#{tipos.size}: #{t[:nome]}" if defined?(Sketchup)
+        begin
+          pr = Prancha.new(t, cfg)
+          base = File.join(pasta, pr.nome_arquivo)
+          saidas = []
+          pdf = nil
+          dxf = nil
+          if f == 0 || f == 2
+            pdf = PDF.new
+            pdf.nova_pagina
+            saidas << pdf
+          end
+          if unico
+            unico.nova_pagina
+            saidas << unico
+          end
+          if f == 2 || f == 3
+            dxf = DXF.new(cfg[:fonte])
+            saidas << dxf
+          end
+          pr.desenhar(Saidas.new(saidas))
+          arqs = []
+          arqs << File.basename(pdf.salvar(base + '.pdf')) if pdf
+          if dxf
+            dxf.salvar(base + '.dxf')
+            arqs << File.basename(base + '.dxf')
+          end
+          arqs << "página #{k + 1}" if unico
+          feitas << "#{t[:nome]}: #{arqs.join(', ')}  (vistas 1:#{pr.escala_vistas})"
+        rescue StandardError => e
+          erros << "#{t[:nome]}: #{e.message}"
+          puts "[Detalhamento PM] #{t[:nome]}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
+        end
+      end
+      if unico && !feitas.empty?
+        nome = [cfg[:prefixo], cfg[:codigo], 'DET', 'PRANCHAS', "R#{cfg[:revisao]}"]
+               .map { |s| s.to_s.strip }.reject(&:empty?).join('-').gsub(%r{[\\/:*?"<>|]}, '_')
+        unico.salvar(File.join(pasta, nome + '.pdf'))
+        feitas.unshift("Arquivo único: #{nome}.pdf")
+      end
+      [feitas, erros]
     end
 
     def self.exportar_csv
