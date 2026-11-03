@@ -7,9 +7,10 @@ module DetalhamentoPM
   unless file_loaded?(__FILE__)
     ext = SketchupExtension.new('Detalhamento Pré-moldado',
                                 File.join('detalhamento_pm', 'main'))
-    ext.description = 'Gera vistas 2D cotadas (superior, frontal e lateral) ' \
-                      'de cada peça do modelo e exporta a lista de peças em CSV.'
-    ext.version     = '0.1.0'
+    ext.description = 'Gera pranchas A3 de formas (DXF) de cada peça pré-moldada: ' \
+                      'vistas superior e lateral com linhas ocultas, cortes ' \
+                      'automáticos, modelo 3D, resumo, revisões e carimbo.'
+    ext.version     = '0.2.0'
     ext.creator     = 'MarcoAntonioMartins'
     ext.copyright   = '2026 MarcoAntonioMartins'
     Sketchup.register_extension(ext, true)

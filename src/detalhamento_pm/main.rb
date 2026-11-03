@@ -1,55 +1,74 @@
 # encoding: UTF-8
-# Detalhamento Pré-moldado
-# Lê as peças do modelo (componentes e grupos), agrupa as iguais e desenha
-# vistas 2D cotadas de cada uma ao lado do modelo.
+# Detalhamento Pré-moldado - integração com o SketchUp.
+# Lê as peças do modelo, agrupa as iguais e gera uma prancha A3 de formas
+# (DXF) para cada tipo de peça.
 require 'sketchup.rb'
+
+dir = File.dirname(__FILE__)
+require File.join(dir, 'geom')
+require File.join(dir, 'dxf')
+require File.join(dir, 'prancha')
 
 module DetalhamentoPM
   module Core
-    PREF        = 'DetalhamentoPM'.freeze
-    NOME_GRUPO  = 'Detalhamento 2D'.freeze
-    TAGS_PADRAO = 'Bloco,Pilares,Consoles,Placas,Vigas,Lajes,Tesouras'.freeze
-    TOL         = 0.5.cm   # cotas parciais mais próximas que isso são unidas
-    MAX_PARCIAIS = 20      # acima disso, mostra só a cota total
+    PREF = 'DetalhamentoPM'.freeze
 
-    VISTAS = [
-      ['VISTA SUPERIOR', lambda { |p| [p.x, p.y] }],
-      ['VISTA FRONTAL',  lambda { |p| [p.x, p.z] }],
-      ['VISTA LATERAL',  lambda { |p| [p.y, p.z] }]
+    CAMPOS = [
+      # chave, rótulo, padrão
+      ['tags',     'Tags a detalhar (separe com vírgula; vazio = todas)',
+       'Bloco,Pilares,Consoles,Placas,Vigas,Lajes,Tesouras'],
+      ['insertos', 'Palavras que identificam insertos',
+       'insert,neoprene,alça,alca,chapa,içamento,icamento'],
+      ['obra',     'Obra', 'EDIFICAÇÃO COMERCIAL'],
+      ['local',    'Local', '-'],
+      ['prefixo',  'Prefixo do arquivo', 'EC'],
+      ['codigo',   'Código da obra no nome do arquivo', 'OBRA'],
+      ['revisao',  'Revisão atual', '00'],
+      ['revisoes', 'Histórico de revisões (separe com ;)', '00 - EMISSÃO INICIAL'],
+      ['data',     'Data (vazio = hoje)', ''],
+      ['fck',      'Fck (MPa)', '40'],
+      ['peso_esp', 'Peso específico do concreto (t/m³)', '2,5'],
+      ['fonte',    'Fonte do texto no DXF', 'romans.shx']
     ].freeze
 
-    # ---------------------------------------------------------------- config
-    def self.cfg
+    TIPOS = [
+      ['pilar', 'PILAR', 'PILARES'], ['viga', 'VIGA', 'VIGAS'],
+      ['placa', 'PLACA', 'PLACAS'], ['laje', 'LAJE', 'LAJES'],
+      ['tesoura', 'TESOURA', 'TESOURAS'], ['bloco', 'BLOCO', 'BLOCOS'],
+      ['console', 'CONSOLE', 'CONSOLES'], ['terça', 'TERÇA', 'TERÇAS'],
+      ['terca', 'TERÇA', 'TERÇAS']
+    ].freeze
+
+    # ------------------------------------------------------------ config
+    def self.valores
+      h = {}
+      CAMPOS.each { |k, _, pad| h[k] = Sketchup.read_default(PREF, k, pad).to_s }
+      h
+    end
+
+    def self.configurar(titulo)
+      v = valores
+      r = UI.inputbox(CAMPOS.map { |c| c[1] }, CAMPOS.map { |c| v[c[0]] }, titulo)
+      return nil unless r
+      CAMPOS.each_with_index { |c, i| Sketchup.write_default(PREF, c[0], r[i].to_s) }
+      cfg_prancha
+    end
+
+    def self.cfg_prancha
+      v = valores
       {
-        tags:     Sketchup.read_default(PREF, 'tags', TAGS_PADRAO).to_s,
-        parciais: Sketchup.read_default(PREF, 'parciais', 'Sim').to_s,
-        espaco:   Sketchup.read_default(PREF, 'espaco', 60).to_f,
-        texto:    Sketchup.read_default(PREF, 'texto', 10).to_f
+        tags: v['tags'].split(',').map { |s| s.strip.downcase }.reject(&:empty?),
+        insertos: v['insertos'].split(',').map { |s| s.strip.downcase }.reject(&:empty?),
+        obra: v['obra'], local: v['local'], prefixo: v['prefixo'],
+        codigo: v['codigo'], revisao: v['revisao'],
+        revisoes: v['revisoes'].split(';').map(&:strip).reject(&:empty?),
+        data: v['data'].strip.empty? ? Time.now.strftime('%d/%m/%Y') : v['data'],
+        fck: v['fck'], peso_esp: v['peso_esp'].tr(',', '.').to_f,
+        fonte: v['fonte'].strip.empty? ? 'romans.shx' : v['fonte'].strip
       }
     end
 
-    def self.configurar
-      c = cfg
-      prompts  = ['Tags a detalhar (separadas por vírgula; vazio = todas)',
-                  'Cotas parciais (consoles, recortes etc.)',
-                  'Espaço entre vistas (cm)',
-                  'Altura do texto (cm)']
-      defaults = [c[:tags], c[:parciais], c[:espaco].to_s, c[:texto].to_s]
-      listas   = ['', 'Sim|Não', '', '']
-      r = UI.inputbox(prompts, defaults, listas, 'Detalhamento Pré-moldado')
-      return false unless r
-      Sketchup.write_default(PREF, 'tags', r[0].to_s)
-      Sketchup.write_default(PREF, 'parciais', r[1].to_s)
-      Sketchup.write_default(PREF, 'espaco', r[2].to_s.tr(',', '.').to_f)
-      Sketchup.write_default(PREF, 'texto', r[3].to_s.tr(',', '.').to_f)
-      true
-    end
-
-    def self.filtros
-      cfg[:tags].split(',').map { |s| s.strip.downcase }.reject(&:empty?)
-    end
-
-    # ------------------------------------------------------------- coleta
+    # ------------------------------------------------------------ coleta
     def self.instancias(ents)
       ents.grep(Sketchup::ComponentInstance) + ents.grep(Sketchup::Group)
     end
@@ -60,12 +79,8 @@ module DetalhamentoPM
       filt.any? { |f| nome.include?(f) }
     end
 
-    # Desce pela hierarquia até achar instâncias cuja tag bate com o filtro.
-    # O que estiver dentro de uma peça encontrada (consoles, insertos...)
-    # passa a fazer parte do desenho dessa peça.
     def self.coletar(ents, filt, out = [])
       instancias(ents).each do |i|
-        next if i.name.start_with?(NOME_GRUPO)
         next if i.hidden? || !i.layer.visible?
         if tag_ok?(i, filt)
           out << i
@@ -78,38 +93,60 @@ module DetalhamentoPM
 
     def self.nome_peca(i)
       n = i.name.to_s.strip
-      n.empty? ? i.definition.name : n
+      n = i.definition.name.to_s if n.empty?
+      n.sub(/#\d+\z/, '').strip
     end
 
-    # Escala própria da instância (componentes esticados), sem rotação.
+    def self.inserto?(i, palavras)
+      txt = [i.layer.name, i.name, i.definition.name].join(' ').downcase
+      palavras.any? { |p| txt.include?(p) }
+    end
+
+    def self.tipo(tag, nome)
+      t = "#{tag} #{nome}".downcase
+      achado = TIPOS.find { |k, _, _| t.include?(k) }
+      achado ? [achado[1], achado[2]] : ['PEÇA', 'PEÇAS']
+    end
+
     def self.escala(i)
       t = i.transformation
       [Geom::Vector3d.new(1, 0, 0), Geom::Vector3d.new(0, 1, 0),
        Geom::Vector3d.new(0, 0, 1)].map { |v| v.transform(t).length.to_f }
     end
 
-    def self.arestas(ents, tr, out = [])
-      ents.each do |e|
-        if e.is_a?(Sketchup::Edge)
-          next if e.hidden? || e.soft?
-          out << [e.start.position.transform(tr), e.end.position.transform(tr)]
-        elsif e.is_a?(Sketchup::ComponentInstance) || e.is_a?(Sketchup::Group)
-          next if e.hidden?
-          arestas(e.definition.entities, tr * e.transformation, out)
-        end
-      end
-      out
+    def self.mm(p)
+      [p.x.to_f * 25.4, p.y.to_f * 25.4, p.z.to_f * 25.4]
     end
 
-    # Move a peça para começar em (0,0,0) e devolve [segmentos, [x, y, z]].
-    def self.normalizar(segs)
-      return [[], [0, 0, 0]] if segs.empty?
-      pts = segs.flatten
-      mn = [pts.map(&:x).min, pts.map(&:y).min, pts.map(&:z).min]
-      mx = [pts.map(&:x).max, pts.map(&:y).max, pts.map(&:z).max]
-      v = Geom::Vector3d.new(-mn[0], -mn[1], -mn[2])
-      [segs.map { |a, b| [a.offset(v), b.offset(v)] },
-       [mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]]]
+    # Percorre a peça: faces e arestas de concreto vão para d[:tris] e
+    # d[:arestas]; o que for inserto vai para d[:insertos] (só arestas).
+    def self.extrair(ents, tr, d, palavras, ins = nil)
+      ents.each do |e|
+        if e.is_a?(Sketchup::Face)
+          next if ins || e.hidden?
+          m = e.mesh(0)
+          pts = (1..m.count_points).map { |k| mm(m.point_at(k).transform(tr)) }
+          m.polygons.each do |pol|
+            idx = pol.map(&:abs)
+            d[:tris] << idx.map { |k| pts[k - 1] } if idx.size == 3
+          end
+        elsif e.is_a?(Sketchup::Edge)
+          next if e.hidden? || e.soft?
+          seg = [mm(e.start.position.transform(tr)), mm(e.end.position.transform(tr))]
+          (ins ? ins[:arestas] : d[:arestas]) << seg
+        elsif e.is_a?(Sketchup::ComponentInstance) || e.is_a?(Sketchup::Group)
+          next if e.hidden? || !e.layer.visible?
+          t2 = tr * e.transformation
+          if ins.nil? && inserto?(e, palavras)
+            novo = { nome: nome_peca(e), arestas: [] }
+            d[:insertos] << novo
+            extrair(e.definition.entities, t2, d, palavras, novo)
+          else
+            extrair(e.definition.entities, t2, d, palavras, ins)
+          end
+        end
+      end
+      d
     end
 
     def self.volume_m3(i)
@@ -120,189 +157,94 @@ module DetalhamentoPM
     end
 
     # Agrupa peças iguais (mesmo nome e mesmas dimensões).
-    def self.agrupar(pecas)
+    def self.agrupar(pecas, cfg)
       cache = {}
       tipos = {}
       pecas.each do |i|
         esc = escala(i)
         ck  = [i.definition, esc.map { |s| s.round(4) }]
-        cache[ck] ||= normalizar(arestas(i.definition.entities,
-                                         Geom::Transformation.scaling(*esc)))
-        segs, dims = cache[ck]
-        next if segs.empty?
-        nome  = nome_peca(i)
-        chave = [nome] + dims.map { |d| d.to_mm.round }
-        t = (tipos[chave] ||= { nome: nome, tag: i.layer.name, segs: segs,
-                                dims: dims, qtd: 0, volume: volume_m3(i) })
+        cache[ck] ||= extrair(i.definition.entities,
+                              Geom::Transformation.scaling(*esc),
+                              { tris: [], arestas: [], insertos: [] }, cfg[:insertos])
+        geo = cache[ck]
+        pts = geo[:tris].flatten(1) + geo[:arestas].flatten(1)
+        next if pts.empty?
+        dims = (0..2).map { |k| pts.map { |q| q[k] }.max - pts.map { |q| q[k] }.min }.sort
+        nome = nome_peca(i)
+        chave = [nome] + dims.map(&:round)
+        t = tipos[chave]
+        unless t
+          tp, tpl = tipo(i.layer.name, nome)
+          t = tipos[chave] = {
+            nome: nome, tag: i.layer.name, tipo: tp, tipo_plural: tpl, qtd: 0,
+            tris: geo[:tris], arestas: geo[:arestas], insertos: geo[:insertos],
+            volume_m3: volume_m3(i), dims: dims
+          }
+        end
         t[:qtd] += 1
       end
       tipos.values.sort_by { |t| [t[:tag], t[:nome]] }
     end
 
-    # ------------------------------------------------------------- desenho
-    def self.texto(ents, str, pos, altura)
-      g = ents.add_group
-      g.entities.add_3d_text(str, TextAlignLeft, 'Arial', false, false,
-                             altura, 0.0, 0.0, true, 0.0)
-      g.transform!(Geom::Transformation.translation(pos))
-      g
-    end
-
-    def self.quebras(vals, total)
-      vs  = vals.select { |x| x > TOL && x < total - TOL }.uniq.sort
-      res = [0.0]
-      vs.each { |x| res << x if x - res.last > TOL }
-      res << total
-      res
-    end
-
-    def self.cotar(ge, w, h, us, vs, d, parciais)
-      if w > TOL
-        q = quebras(us, w)
-        if parciais && q.size > 2 && q.size <= MAX_PARCIAIS + 1
-          q.each_cons(2) do |a, b|
-            ge.add_dimension_linear([a, 0, 0], [b, 0, 0], [0, -d, 0])
-          end
-          ge.add_dimension_linear([0, 0, 0], [w, 0, 0], [0, -2 * d, 0])
-        else
-          ge.add_dimension_linear([0, 0, 0], [w, 0, 0], [0, -d, 0])
-        end
-      end
-      return unless h > TOL
-      q = quebras(vs, h)
-      if parciais && q.size > 2 && q.size <= MAX_PARCIAIS + 1
-        q.each_cons(2) do |a, b|
-          ge.add_dimension_linear([0, a, 0], [0, b, 0], [-d, 0, 0])
-        end
-        ge.add_dimension_linear([0, 0, 0], [0, h, 0], [-2 * d, 0, 0])
-      else
-        ge.add_dimension_linear([0, 0, 0], [0, h, 0], [-d, 0, 0])
-      end
-    end
-
-    def self.desenhar_vista(pai, segs, map, titulo, origem, d, c)
-      g  = pai.entities.add_group
-      g.name = titulo
-      ge = g.entities
-      vistos = {}
-      us = []
-      vs = []
-      segs.each do |a, b|
-        ua, va = map.call(a)
-        ub, vb = map.call(b)
-        ka = [ua.to_mm.round(1), va.to_mm.round(1)]
-        kb = [ub.to_mm.round(1), vb.to_mm.round(1)]
-        next if ka == kb
-        k = [ka, kb].sort
-        next if vistos[k]
-        vistos[k] = true
-        ge.add_line([ua, va, 0], [ub, vb, 0])
-        us << ua << ub
-        vs << va << vb
-      end
-      w = us.max.to_f
-      h = vs.max.to_f
-      cotar(ge, w, h, us, vs, d, c[:parciais] == 'Sim')
-      texto(ge, titulo, [0, h + d * 0.6, 0], c[:texto].cm * 0.7)
-      g.transform!(Geom::Transformation.translation(origem))
-      [w, h]
-    end
-
-    def self.fmt(v, casas = 1)
-      format("%.#{casas}f", v).tr('.', ',')
-    end
-
-    def self.desenhar_peca(folha, t, x0, y_topo, c)
-      x, y, z = t[:dims]
-      d = [[[x, y, z].max * 0.05, 12.cm].max, 40.cm].min
-      txt = c[:texto].cm
-      esp = c[:espaco].cm
-
-      tamanhos = [[x, y], [x, z], [y, z]]
-      hmax = tamanhos.map { |_, h| h }.max
-      base_y = y_topo - txt * 2.5 - d - hmax
-
-      cab = "#{t[:nome]}   |   QTD: #{t[:qtd]}   |   #{t[:tag]}   |   " \
-            "#{fmt(x.to_cm)} x #{fmt(y.to_cm)} x #{fmt(z.to_cm)} cm"
-      cab += "   |   #{fmt(t[:volume], 3)} m³" if t[:volume]
-      texto(folha.entities, cab, [x0, y_topo - txt, 0], txt)
-
-      cx = x0 + 2.5 * d
-      VISTAS.each_with_index do |(titulo, map), k|
-        w, = tamanhos[k]
-        desenhar_vista(folha, t[:segs], map, titulo, [cx, base_y, 0], d, c)
-        cx += w + 3.5 * d + esp
-      end
-      base_y - 2.5 * d - esp * 1.5
-    end
-
-    def self.apagar_existente(model)
-      grupos = model.entities.grep(Sketchup::Group)
-                    .select { |g| g.name.start_with?(NOME_GRUPO) }
-      model.entities.erase_entities(grupos) unless grupos.empty?
-      grupos.size
-    end
-
-    # ------------------------------------------------------------- comandos
-    def self.gerar(somente_selecao = false)
+    def self.pecas_do_modelo(selecao, cfg)
       model = Sketchup.active_model
-      if somente_selecao
-        pecas = instancias(model.selection.to_a)
-                .reject { |i| i.name.start_with?(NOME_GRUPO) }
+      if selecao
+        instancias(model.selection.to_a)
       else
-        return unless configurar
-        pecas = coletar(model.entities, filtros)
+        coletar(model.entities, cfg[:tags])
       end
+    end
+
+    # ------------------------------------------------------------ comandos
+    def self.gerar_pranchas(selecao = false)
+      model = Sketchup.active_model
+      if selecao && instancias(model.selection.to_a).empty?
+        UI.messagebox('Selecione uma ou mais peças (componentes ou grupos).')
+        return
+      end
+      cfg = configurar('Pranchas A3 de formas')
+      return unless cfg
+      pecas = pecas_do_modelo(selecao, cfg)
       if pecas.empty?
         UI.messagebox('Nenhuma peça encontrada. Confira o filtro de tags ' \
                       'ou se as peças são componentes/grupos.')
         return
       end
+      pasta = UI.select_directory(title: 'Pasta onde salvar as pranchas (DXF)')
+      return unless pasta
 
-      substituir = false
-      unless somente_selecao
-        existe = model.entities.grep(Sketchup::Group)
-                      .any? { |g| g.name.start_with?(NOME_GRUPO) }
-        if existe
-          r = UI.messagebox('Já existe um detalhamento no modelo. Substituir?',
-                            MB_YESNOCANCEL)
-          return if r == IDCANCEL
-          substituir = (r == IDYES)
+      Sketchup.status_text = 'Lendo as peças...'
+      tipos = agrupar(pecas, cfg)
+      feitas = []
+      erros = []
+      tipos.each_with_index do |t, k|
+        Sketchup.status_text = "Gerando prancha #{k + 1}/#{tipos.size}: #{t[:nome]}"
+        begin
+          pr = Prancha.new(t, cfg)
+          caminho = File.join(pasta, pr.nome_arquivo + '.dxf')
+          pr.gerar(caminho)
+          feitas << "#{File.basename(caminho)}  (vistas 1:#{pr.escala_vistas})"
+        rescue StandardError => e
+          erros << "#{t[:nome]}: #{e.message}"
+          puts "[Detalhamento PM] #{t[:nome]}: #{e.message}\n#{e.backtrace.first(5).join("\n")}"
         end
       end
+      Sketchup.status_text = ''
 
-      c = cfg
-      model.start_operation('Gerar detalhamento 2D', true)
-      begin
-        apagar_existente(model) if substituir
-        tipos = agrupar(pecas)
-        tag = model.layers['Detalhamento 2D'] || model.layers.add('Detalhamento 2D')
-        folha = model.entities.add_group
-        folha.name  = somente_selecao ? "#{NOME_GRUPO} - seleção" : NOME_GRUPO
-        folha.layer = tag
-
-        bb = model.bounds
-        x0 = bb.max.x + 5.m
-        y  = bb.max.y
-        tipos.each { |t| y = desenhar_peca(folha, t, x0, y, c) }
-
-        model.commit_operation
-        total = tipos.inject(0) { |s, t| s + t[:qtd] }
-        UI.messagebox("Detalhamento gerado: #{tipos.size} tipo(s) de peça, " \
-                      "#{total} peça(s) no total.\n\nUse Câmera > Projeção " \
-                      "paralela e a vista Topo para visualizar.")
-        Sketchup.active_model.active_view.zoom(folha)
-      rescue StandardError => e
-        model.abort_operation
-        UI.messagebox("Erro ao gerar o detalhamento:\n#{e.message}")
-        puts e.backtrace.join("\n")
+      msg = "#{feitas.size} prancha(s) gerada(s) em:\n#{pasta}\n\n"
+      msg += feitas.first(15).join("\n")
+      msg += "\n..." if feitas.size > 15
+      msg += "\n\nNão foi possível gerar:\n#{erros.join("\n")}" unless erros.empty?
+      msg += "\n\nAbrir a pasta?"
+      if UI.messagebox(msg, MB_YESNO) == IDYES
+        UI.openURL('file:///' + pasta.tr('\\', '/'))
       end
     end
 
     def self.exportar_csv
-      model = Sketchup.active_model
-      return unless configurar
-      tipos = agrupar(coletar(model.entities, filtros))
+      cfg = configurar('Lista de peças')
+      return unless cfg
+      tipos = agrupar(pecas_do_modelo(false, cfg), cfg)
       if tipos.empty?
         UI.messagebox('Nenhuma peça encontrada com o filtro de tags atual.')
         return
@@ -310,49 +252,37 @@ module DetalhamentoPM
       path = UI.savepanel('Salvar lista de peças', '', 'lista_de_pecas.csv')
       return unless path
       path += '.csv' unless path.downcase.end_with?('.csv')
-
-      linhas = [['Peça', 'Tag', 'Qtd', 'X (cm)', 'Y (cm)', 'Z (cm)',
-                 'Volume unit. (m³)', 'Volume total (m³)']]
+      fmt = lambda { |v, c| v.nil? ? '' : format("%.#{c}f", v).tr('.', ',') }
+      linhas = [['Peça', 'Tipo', 'Tag', 'Qtd', 'Largura (cm)', 'Altura (cm)',
+                 'Comp. (cm)', 'Volume unit. (m³)', 'Volume total (m³)', 'Peso unit. (t)']]
       tipos.each do |t|
-        x, y, z = t[:dims].map(&:to_cm)
-        vu = t[:volume]
-        linhas << [t[:nome], t[:tag], t[:qtd], fmt(x), fmt(y), fmt(z),
-                   vu ? fmt(vu, 3) : '', vu ? fmt(vu * t[:qtd], 3) : '']
+        a, b, l = t[:dims].map { |v| v / 10.0 }
+        vol = t[:volume_m3] || G.volume(t[:tris]) / 1e9
+        linhas << [t[:nome], t[:tipo], t[:tag], t[:qtd], fmt.call(a, 1), fmt.call(b, 1),
+                   fmt.call(l, 1), fmt.call(vol, 3), fmt.call(vol * t[:qtd], 3),
+                   fmt.call(vol * cfg[:peso_esp], 2)]
       end
       File.open(path, 'w:UTF-8') do |f|
         f.write("﻿")
-        linhas.each do |l|
-          f.puts(l.map { |v| "\"#{v.to_s.gsub('"', '""')}\"" }.join(';'))
-        end
+        linhas.each { |ln| f.puts(ln.map { |v| "\"#{v.to_s.gsub('"', '""')}\"" }.join(';')) }
       end
       UI.messagebox("Lista salva em:\n#{path}")
     rescue StandardError => e
       UI.messagebox("Erro ao exportar:\n#{e.message}")
     end
 
-    def self.apagar_interativo
-      model = Sketchup.active_model
-      return unless UI.messagebox('Apagar todo o detalhamento 2D gerado?',
-                                  MB_YESNO) == IDYES
-      model.start_operation('Apagar detalhamento 2D', true)
-      n = apagar_existente(model)
-      model.commit_operation
-      UI.messagebox("#{n} grupo(s) de detalhamento apagado(s).")
-    end
-
-    # ------------------------------------------------------------- menus
+    # ------------------------------------------------------------ menus
     unless file_loaded?(__FILE__)
       m = UI.menu('Extensions').add_submenu('Detalhamento Pré-moldado')
-      m.add_item('Gerar detalhamento 2D...')          { gerar(false) }
-      m.add_item('Detalhar peças selecionadas')       { gerar(true) }
+      m.add_item('Gerar pranchas A3 (todas as peças)...') { gerar_pranchas(false) }
+      m.add_item('Gerar prancha das peças selecionadas...') { gerar_pranchas(true) }
       m.add_separator
-      m.add_item('Exportar lista de peças (CSV)...')  { exportar_csv }
-      m.add_item('Apagar detalhamento 2D')            { apagar_interativo }
+      m.add_item('Exportar lista de peças (CSV)...') { exportar_csv }
 
       UI.add_context_menu_handler do |menu|
         sel = Sketchup.active_model.selection
         if sel.any? { |e| e.is_a?(Sketchup::ComponentInstance) || e.is_a?(Sketchup::Group) }
-          menu.add_item('Detalhar peça(s) selecionada(s)') { gerar(true) }
+          menu.add_item('Gerar prancha A3 da peça') { gerar_pranchas(true) }
         end
       end
       file_loaded(__FILE__)
