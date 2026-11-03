@@ -24,7 +24,7 @@ Extensão para SketchUp que lê as peças de concreto pré-moldado de um modelo 
 - Folha A3 com margens da NBR 16752.
 
 O nome dos arquivos segue o padrão `PREFIXO-OBRA-DET-PEÇA-Rxx`, por exemplo
-`EC-VITOR-DET-PPF1-R01.pdf`.
+`EC-MARCO-DET-PPF1-R01.pdf`.
 
 ## Instalação
 
@@ -56,7 +56,7 @@ próxima vez:
 | Tags a detalhar | `Bloco,Pilares,Consoles,Placas,Vigas,Lajes,Tesouras` |
 | Palavras que identificam insertos | `insert,neoprene,alça,chapa,içamento` |
 | Obra / Local | `EDIFICAÇÃO COMERCIAL` |
-| Prefixo do arquivo / Código da obra | `EC` / `VITOR` |
+| Prefixo do arquivo / Código da obra | `EC` / `MARCO` |
 | Revisão atual / Histórico | `01` / `00 - EMISSÃO INICIAL; 01 - ALTERAÇÃO…` |
 | Data | vazio = hoje |
 | Fck (MPa) / Peso específico (t/m³) | `40` / `2,5` |
