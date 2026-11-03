@@ -1,0 +1,6 @@
+dist/
+test/saida/
+*.rbz
+*.skb
+.DS_Store
+Thumbs.db
