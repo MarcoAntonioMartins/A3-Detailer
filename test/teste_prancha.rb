@@ -33,6 +33,33 @@ pv = Prancha.new(Apoio.viga, Apoio.cfg)
 pv.gerar(File.join(SAIDA, pv.nome_arquivo + '.pdf'))
 confere('viga sem variação de seção tem 1 corte', pv.cortes.size == 1)
 
+# Laje parecida com a LAJE09: cotas pequenas, recortes e nomes das vistas
+laje = Apoio.laje09
+pl = Prancha.new(laje, Apoio.cfg)
+pl.gerar(File.join(SAIDA, pl.nome_arquivo + '.pdf'))
+g = Apoio::Grava.new
+Prancha.new(laje, Apoio.cfg).desenhar(g)
+cotas = g.cotas.map { |t| t[:s] }
+conta = lambda { |s| cotas.count(s) }
+confere('LAJE09: escala das vistas 1:20', pl.escala_vistas == 20)
+confere('LAJE09: cadeia horizontal com os trechos pequenos (4 e 18)',
+        conta.call('4') >= 2 && conta.call('18') >= 2)
+confere('LAJE09: cadeia vertical completa (92,7 / 15 / 5)',
+        %w[92,7 15 5].all? { |s| cotas.include?(s) })
+confere('LAJE09: cota local do dente na ponta (5 cm)', conta.call('5') >= 2)
+confere('LAJE09: cota local do recorte D (20 cm)', cotas.include?('20'))
+confere('LAJE09: cota local do rebaixo da espessura (10 cm)', conta.call('10') >= 2)
+confere('LAJE09: textos de cota sem sobreposição', g.sobrepostos.empty?)
+puts "      sobrepostos: #{g.sobrepostos.inspect}" unless g.sobrepostos.empty?
+ty = lambda { |gr, s| gr.textos.find { |t| t[:s] == s }[:y] }
+confere('LAJE09: face grande (L x B) chamada de VISTA SUPERIOR',
+        ty.call(g, 'VISTA SUPERIOR') < ty.call(g, 'VISTA LATERAL'))
+gp = Apoio::Grava.new
+Prancha.new(Apoio.ppf1, Apoio.cfg).desenhar(gp)
+confere('PILAR mantém VISTA SUPERIOR = L x A (em cima)',
+        ty.call(gp, 'VISTA SUPERIOR') > ty.call(gp, 'VISTA LATERAL'))
+confere('PPF1: textos de cota sem sobreposição', gp.sobrepostos.empty?)
+
 # PDF com várias páginas
 doc = PDF.new
 [Apoio.ppf1, Apoio.viga].each do |p|

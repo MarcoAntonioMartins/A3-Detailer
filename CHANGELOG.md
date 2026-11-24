@@ -3,6 +3,18 @@
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.3.2] - 2026-11-24
+### Corrigido
+- Cadeias de cotas não somem mais quando algum trecho é pequeno: todos os trechos
+  são cotados e o texto dos trechos pequenos muda de lado ou sai para fora das
+  linhas de chamada, sem encavalar com os vizinhos nem com as marcas de corte.
+### Adicionado
+- Cota local da profundidade de cada recorte ou rebaixo na borda superior das
+  vistas (ex.: dente na ponta e recorte de borda das lajes).
+### Alterado
+- Em lajes e placas, a face grande (comprimento × largura) passa a se chamar
+  "VISTA SUPERIOR" e a espessura "VISTA LATERAL". Pilares e vigas não mudam.
+
 ## [0.3.1] - 2026-11-02
 ### Alterado
 - Projeto renomeado para **A3-Detailer**: nome no Gerenciador de extensões,

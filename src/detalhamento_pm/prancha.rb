@@ -53,6 +53,7 @@ module DetalhamentoPM
     # Desenha a prancha num gravador (DXF, página de PDF ou Saidas).
     def desenhar(saida)
       @d = saida
+      @ocupado = []   # caixas dos textos de cota já colocados
       folha
       y_dir = carimbo_e_tabelas
       @cortes = calcular_cortes
@@ -137,34 +138,109 @@ module DetalhamentoPM
       l(x - 0.9, y - 0.9, x + 0.9, y + 0.9, 'COTAS')
     end
 
-    def cota_h(x1, x2, yref, y, mm)
-      return if (x2 - x1).abs < 0.05
-      s = y > yref ? 1 : -1
-      [x1, x2].each { |x| l(x, yref + s * 1.0, x, y + s * 1.5, 'COTAS') }
-      l(x1 - 1.5, y, x2 + 1.5, y, 'COTAS')
-      tick(x1, y)
-      tick(x2, y)
-      t = fmt_cm(mm)
-      if x2 - x1 >= larg(t, TD) + 1
-        txt(t, (x1 + x2) / 2.0, y + 0.8, TD, 'COTAS', 1)
+    # Retângulo ocupado por um texto: [x0, y0, x1, y1] em mm de papel.
+    # rot 0: o texto cresce para +x e para cima; rot 90: cresce para +y e
+    # para -x (letras "deitadas" à esquerda da linha de base).
+    def caixa_texto(s, x, y, h, alinh, rot)
+      w = larg(s, h)
+      ini = -w * alinh / 2.0
+      if rot == 90
+        [x - h, y + ini, x, y + ini + w]
       else
-        txt(t, x2 + 1.8, y + 0.8, TD, 'COTAS', 0)
+        [x + ini, y, x + ini + w, y + h]
       end
     end
 
-    def cota_v(y1, y2, xref, x, mm)
-      return if (y2 - y1).abs < 0.05
-      s = x > xref ? 1 : -1
-      [y1, y2].each { |y| l(xref + s * 1.0, y, x + s * 1.5, y, 'COTAS') }
-      l(x, y1 - 1.5, x, y2 + 1.5, 'COTAS')
-      tick(x, y1)
-      tick(x, y2)
-      t = fmt_cm(mm)
-      if y2 - y1 >= larg(t, TD) + 1
-        txt(t, x - 0.8, (y1 + y2) / 2.0, TD, 'COTAS', 1, 90)
-      else
-        txt(t, x - 0.8, y2 + 1.8, TD, 'COTAS', 0, 90)
+    def livre?(cx)
+      m = 0.3
+      @ocupado.none? do |o|
+        cx[0] < o[2] + m && cx[2] > o[0] - m && cx[1] < o[3] + m && cx[3] > o[1] - m
       end
+    end
+
+    # Escreve o texto de cota na primeira posição candidata livre
+    # ([x, y, alinh]). Se todas estiverem ocupadas, desloca a primeira ao
+    # longo da linha de cota até achar espaço.
+    def colocar(t, cands, rot)
+      cands.each do |x, y, a|
+        cx = caixa_texto(t, x, y, TD, a, rot)
+        next unless livre?(cx)
+        @ocupado << cx
+        return txt(t, x, y, TD, 'COTAS', a, rot)
+      end
+      x, y, a = cands.first
+      40.times do |k|
+        dx = rot == 90 ? 0 : (k + 1) * 1.0
+        dy = rot == 90 ? (k + 1) * 1.0 : 0
+        cx = caixa_texto(t, x + dx, y + dy, TD, a, rot)
+        next unless livre?(cx)
+        @ocupado << cx
+        return txt(t, x + dx, y + dy, TD, 'COTAS', a, rot)
+      end
+      @ocupado << caixa_texto(t, x, y, TD, a, rot)
+      txt(t, x, y, TD, 'COTAS', a, rot)
+    end
+
+    # Ordem de colocação: primeiro os textos que cabem no trecho (ficam
+    # centrados), depois os trechos pequenos, que procuram espaço ao lado.
+    def ordem_textos(segs)
+      segs.sort_by { |p1, p2, mm| -((p2 - p1) - larg(fmt_cm(mm), TD)) }
+    end
+
+    # Cadeia de cotas horizontais. segs = [[x1, x2, mm], ...] (x em papel).
+    # Todo trecho é cotado; nos trechos pequenos o texto sai para fora das
+    # linhas de chamada ou para o outro lado da linha de cota.
+    def cadeia_h(segs, yref, y)
+      segs = segs.reject { |x1, x2, _| (x2 - x1).abs < 0.05 }
+      s = y > yref ? 1 : -1
+      segs.each do |x1, x2, _|
+        [x1, x2].each { |x| l(x, yref + s * 1.0, x, y + s * 1.5, 'COTAS') }
+        l(x1 - 1.5, y, x2 + 1.5, y, 'COTAS')
+        tick(x1, y)
+        tick(x2, y)
+      end
+      acima = y + 0.8
+      abaixo = y - 0.8 - TD
+      ordem_textos(segs).each do |x1, x2, mm|
+        t = fmt_cm(mm)
+        c = (x1 + x2) / 2.0
+        # centrado no trecho (alternando o lado da linha); se os dois lados
+        # estiverem ocupados, sai para fora das linhas de chamada
+        cands = [[c, acima, 1], [c, abaixo, 1],
+                 [x2 + 1.8, acima, 0], [x1 - 1.8, acima, 2],
+                 [x2 + 1.8, abaixo, 0], [x1 - 1.8, abaixo, 2]]
+        colocar(t, cands, 0)
+      end
+    end
+
+    # Cadeia de cotas verticais. segs = [[y1, y2, mm], ...] (y em papel).
+    def cadeia_v(segs, xref, x)
+      segs = segs.reject { |y1, y2, _| (y2 - y1).abs < 0.05 }
+      s = x > xref ? 1 : -1
+      segs.each do |y1, y2, _|
+        [y1, y2].each { |y| l(xref + s * 1.0, y, x + s * 1.5, y, 'COTAS') }
+        l(x, y1 - 1.5, x, y2 + 1.5, 'COTAS')
+        tick(x, y1)
+        tick(x, y2)
+      end
+      esq = x - 0.8
+      dir = x + 0.8 + TD
+      ordem_textos(segs).each do |y1, y2, mm|
+        t = fmt_cm(mm)
+        c = (y1 + y2) / 2.0
+        cands = [[esq, c, 1], [dir, c, 1],
+                 [esq, y2 + 1.8, 0], [esq, y1 - 1.8, 2],
+                 [dir, y2 + 1.8, 0], [dir, y1 - 1.8, 2]]
+        colocar(t, cands, 90)
+      end
+    end
+
+    def cota_h(x1, x2, yref, y, mm)
+      cadeia_h([[x1, x2, mm]], yref, y)
+    end
+
+    def cota_v(y1, y2, xref, x, mm)
+      cadeia_v([[y1, y2, mm]], xref, x)
     end
 
     def cadeia?(q)
@@ -275,7 +351,63 @@ module DetalhamentoPM
       G.quebras(cs, TOL)
     end
 
+    # Em lajes e placas a face grande (L x B) é a vista de cima e a
+    # espessura (L x A) é a vista de lado; em pilares e vigas é o contrário.
+    def laje?
+      %w[LAJE PLACA].include?(@p[:tipo].to_s.upcase)
+    end
+
+    # Títulos de [vista L x A, vista L x B].
+    def titulos_vistas
+      laje? ? ['VISTA LATERAL', 'VISTA SUPERIOR'] : ['VISTA SUPERIOR', 'VISTA LATERAL']
+    end
+
+    # Recortes e rebaixos na borda superior da vista: trechos ao longo de L
+    # onde o topo da silhueta fica abaixo da altura total. eixo = índice da
+    # coordenada vertical da vista (@ia ou @ib). Devolve [[a, b, h], ...] (mm reais).
+    def recortes(eixo, alt, hq)
+      k = eixo == @ia ? 0 : 1
+      res = []
+      hq.each_cons(2) do |a, b|
+        next if b - a < TOL
+        segs = G.corte(@tris, @il, (a + b) / 2.0, @ia, @ib)
+        next if segs.empty?
+        h = segs.flatten(1).map { |q| q[k] }.max
+        next unless h < alt - TOL
+        ult = res.last
+        if ult && (ult[1] - a).abs < 1e-6 && (ult[2] - h).abs < TOL
+          ult[1] = b
+        else
+          res << [a, b, h]
+        end
+      end
+      res
+    end
+
+    # Cota vertical local com a profundidade de cada recorte, junto dele.
+    def cotas_recortes(eixo, alt, hq, ox, oy, s)
+      yt = oy + alt / s
+      recortes(eixo, alt, hq).each do |a, b, h|
+        xa = ox + a / s
+        xb = ox + b / s
+        if a <= TOL
+          # recorte na ponta esquerda: a parede de referência é a da direita
+          x = (xa + xb) / 2.0
+          xref = xb
+        elsif b >= @L - TOL
+          x = (xa + xb) / 2.0
+          xref = xa
+        else
+          # recorte no meio: fora do centro, onde fica a marca de corte
+          x = xa + (xb - xa) * 0.35
+          xref = xa
+        end
+        cota_v(oy + h / s, yt, xref, x, alt - h)
+      end
+    end
+
     def vistas(x0, x1, y0, y1)
+      tit_sup, tit_lat = titulos_vistas
       sup = info(@vs, @A)
       lat = info(@vl, @B)
       ins = centros_insertos(@vl)
@@ -292,25 +424,33 @@ module DetalhamentoPM
       # -- vista superior
       txt("#{@p[:nome]} (#{@p[:qtd]}x)", FX0 + 4, y1 - 4.5, 3.5)
       txt("ESCALA: 1:#{s}", FX0 + 4, y1 - 8.5, 2.0)
-      txt('VISTA SUPERIOR', FX0 + 4, y1 - 12, 2.0)
+      txt(tit_sup, FX0 + 4, y1 - 12, 2.0)
       topo = y1 - 15 - sup_rows * ROW - 2 - sup[:ptop] / s
       oy = topo - @A / s
       desenhar_vista(@vs, x0, oy, s)
       cotas_vista(sup, x0, oy, topo + sup[:ptop] / s, s, @A, [])
+      cotas_recortes(@ia, @A, sup[:hq], x0, oy, s)
       fundo = oy - sup[:pbot] / s
 
-      # -- vista lateral
+      # -- vista lateral (L x B; em lajes e placas é a vista superior)
       yt = fundo - 6
-      txt('VISTA LATERAL', FX0 + 4, yt - 3.5, 2.5)
+      txt(tit_lat, FX0 + 4, yt - 3.5, 2.5)
       topo = yt - 5 - (lat_rows * ROW + 2) - 8 - lat[:ptop] / s
       oy = topo - @B / s
       desenhar_vista(@vl, x0, oy, s)
       rotulos_insertos(@vl, x0, oy, s)
-      cotas_vista(lat, x0, oy, topo + lat[:ptop] / s + 8, s, @B, ins)
-
-      # marcas de corte
+      # as marcas de corte ocupam espaço: os textos de cota desviam delas
       ytop = topo + lat[:ptop] / s
       ybot = oy - lat[:pbot] / s
+      @cortes.each do |c|
+        x = x0 + c[:pos] / s
+        @ocupado << [x - 2.5, ytop + 1, x + 0.8 + larg(c[:letra], 2.5), ytop + 6]
+        @ocupado << [x - 2.5, ybot - 6, x + 0.8 + larg(c[:letra], 2.5), ybot - 1]
+      end
+      cotas_vista(lat, x0, oy, topo + lat[:ptop] / s + 8, s, @B, ins)
+      cotas_recortes(@ib, @B, lat[:hq], x0, oy, s)
+
+      # marcas de corte
       @cortes.each do |c|
         x = x0 + c[:pos] / s
         [[ytop + 1, ytop + 6], [ybot - 1, ybot - 6]].each do |ya, yb|
@@ -356,21 +496,21 @@ module DetalhamentoPM
       fy = lambda { |v| oy + v / s }
       linha = 0
       yrow = lambda { |k| base + 4 + k * ROW }
-      cabe = lambda { |q, minimo| q.each_cons(2).all? { |a, b| (b - a) / s >= minimo } }
-      if cadeia?(inf[:hq]) && cabe.call(inf[:hq], 2.0)
-        inf[:hq].each_cons(2) { |a, b| cota_h(fx.call(a), fx.call(b), topo, yrow.call(linha), b - a) }
+      trechos = lambda { |q, f| q.each_cons(2).map { |a, b| [f.call(a), f.call(b), b - a] } }
+      if cadeia?(inf[:hq])
+        cadeia_h(trechos.call(inf[:hq], fx), topo, yrow.call(linha))
         linha += 1
       end
       unless ins.empty?
         pts = G.quebras([0.0] + ins + [@L], TOL)
-        pts.each_cons(2) { |a, b| cota_h(fx.call(a), fx.call(b), topo, yrow.call(linha), b - a) }
+        cadeia_h(trechos.call(pts, fx), topo, yrow.call(linha))
         linha += 1
       end
       cota_h(fx.call(0), fx.call(@L), topo, yrow.call(linha), @L)
 
       col = 0
-      if cadeia?(inf[:vq]) && cabe.call(inf[:vq], 4.0)
-        inf[:vq].each_cons(2) { |a, b| cota_v(fy.call(a), fy.call(b), ox, ox - 4, b - a) }
+      if cadeia?(inf[:vq])
+        cadeia_v(trechos.call(inf[:vq], fy), ox, ox - 4)
         col += 1
       end
       cota_v(fy.call(0), fy.call(alt), ox, ox - 4 - col * ROW, alt)
@@ -451,13 +591,13 @@ module DetalhamentoPM
         fy = lambda { |v| oy + (v - bmin) / s }
         lin = 0
         if cadeia?(qa)
-          qa.each_cons(2) { |a, b| cota_h(fx.call(a), fx.call(b), oy, oy - 4, b - a) }
+          cadeia_h(qa.each_cons(2).map { |a, b| [fx.call(a), fx.call(b), b - a] }, oy, oy - 4)
           lin = 1
         end
         cota_h(ox, ox + w, oy, oy - 4 - lin * ROW, amax - amin)
         col = 0
         if cadeia?(qb)
-          qb.each_cons(2) { |a, b| cota_v(fy.call(a), fy.call(b), ox, ox - 4, b - a) }
+          cadeia_v(qb.each_cons(2).map { |a, b| [fy.call(a), fy.call(b), b - a] }, ox, ox - 4)
           col = 1
         end
         cota_v(oy, oy + h, ox, ox - 4 - col * ROW, bmax - bmin)

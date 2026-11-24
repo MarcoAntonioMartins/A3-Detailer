@@ -72,6 +72,68 @@ module Apoio
       tris: tris, arestas: arestas, insertos: [] }
   end
 
+  # Laje parecida com a LAJE09: 679 x 112,7 x 25 cm, ao longo de x.
+  # y = largura (112,7), z = espessura (25). Na ponta esquerda: dente de
+  # 4 x 5 cm na borda e espessura reduzida para 15 cm nos primeiros 22 cm.
+  # Recorte de 33 x 20 cm na borda (x de 500 a 533 cm).
+  def laje09
+    tris, arestas = malha([[0, 6790, 0, 1127, 0, 250]],
+                          [[-1, 40, 1077, 1128, -1, 251],
+                           [-1, 220, -1, 1128, 150, 251],
+                           [5000, 5330, 927, 1128, -1, 251]])
+    { nome: 'LAJE09', tag: '6. Lajes', tipo: 'LAJE', tipo_plural: 'LAJES', qtd: 1,
+      tris: tris, arestas: arestas, insertos: [] }
+  end
+
+  # Gravador que só guarda o que foi desenhado (para os testes).
+  class Grava
+    attr_reader :linhas, :textos
+
+    def initialize
+      @linhas = []
+      @textos = []
+    end
+
+    def line(*a)
+      @linhas << a
+    end
+
+    def text(s, x, y, h, camada, alinh = 0, rot = 0)
+      @textos << { s: s.to_s, x: x, y: y, h: h, camada: camada, alinh: alinh, rot: rot }
+    end
+
+    def cotas
+      @textos.select { |t| t[:camada] == 'COTAS' }
+    end
+
+    # Caixa aproximada do texto (mesma regra de largura da Prancha).
+    def caixa(t)
+      w = t[:s].length * t[:h] * 0.72
+      ini = -w * t[:alinh] / 2.0
+      if t[:rot] == 90
+        [t[:x] - t[:h], t[:y] + ini, t[:x], t[:y] + ini + w]
+      else
+        [t[:x] + ini, t[:y], t[:x] + ini + w, t[:y] + t[:h]]
+      end
+    end
+
+    # Pares de textos de cota que se sobrepõem.
+    def sobrepostos
+      cs = cotas
+      res = []
+      cs.each_with_index do |a, i|
+        ca = caixa(a)
+        cs[(i + 1)..-1].each do |b|
+          cb = caixa(b)
+          if ca[0] < cb[2] - 0.05 && ca[2] > cb[0] + 0.05 && ca[1] < cb[3] - 0.05 && ca[3] > cb[1] + 0.05
+            res << [a[:s], b[:s]]
+          end
+        end
+      end
+      res
+    end
+  end
+
   def cfg(extra = {})
     { obra: 'EDIFICAÇÃO COMERCIAL', local: '-', prefixo: 'EC', codigo: 'TESTE',
       revisao: '01', revisoes: ['00 - EMISSÃO INICIAL', '01 - ALTERAÇÃO DA QUANTIDADE (12 -> 11)'],
