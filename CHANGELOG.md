@@ -12,6 +12,10 @@ e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/
 - Até 6 cortes por prancha (eram 4). Na escolha, a seção principal e um corte
   por tipo de saliência entram primeiro; as vagas que sobram vão para as seções
   mais compridas.
+- Cortes voltam a ficar sempre embaixo, à esquerda do carimbo e apoiados na
+  margem inferior, como na prancha de referência (na v0.3.3 eles podiam subir
+  para o meio da folha). Cada corte ocupa só a largura de que precisa, em vez
+  de fatias iguais, o que mantém a escala boa (LAJE09: 1:25 -> 1:20).
 
 ## [0.3.3] - 2026-11-24
 ### Alterado

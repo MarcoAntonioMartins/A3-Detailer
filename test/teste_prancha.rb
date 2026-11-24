@@ -70,7 +70,14 @@ pr4b = Prancha.new(p4, Apoio.cfg)
 pr4b.desenhar(g4)
 confere('PPF04: dimensões 65 x 70 x 1010', g4.textos.any? { |t| t[:s] == '1010' })
 confere('PPF04: vistas em 1:30 (eram 1:40 com a coluna 3D larga)', pr4.escala_vistas == 30)
-confere('PPF04: cortes em 1:20 ou maior', pr4.escala_cortes <= 20)
+confere('PPF04: 5 cortes em 1:25 ou maior', pr4.cortes.size == 5 && pr4.escala_cortes <= 25)
+titulos_embaixo = lambda do |gr|
+  ts = gr.textos.select { |t| t[:s] =~ /\ACORTE [A-Z]-[A-Z]\z/ }
+  !ts.empty? && ts.all? { |t| t[:y] < 90 }
+end
+confere('PPF04: cortes embaixo, à esquerda do carimbo (como no padrão)', titulos_embaixo.call(g4))
+confere('LAJE09: cortes embaixo e em escala legível (1:25)',
+        titulos_embaixo.call(g) && pl.escala_cortes <= 25)
 confere('PPF04: console saliente não vira "recorte" no resto da peça',
         pr4b.recortes.all?(&:empty?))
 confere('PPF04: rótulos dos neoprenes fora da peça', g4.rotulos_sobre_peca.empty?)

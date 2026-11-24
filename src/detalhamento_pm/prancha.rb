@@ -80,13 +80,15 @@ module DetalhamentoPM
       end
       y_vis = vistas(FX0 + 17, vx1, y_dir + 3, FY1 - 2)
 
-      # cortes: no canto inferior esquerdo ou na faixa livre entre as vistas
-      # e o carimbo, onde couberem em escala maior
+      # cortes: embaixo, à esquerda do carimbo, apoiados na margem inferior
+      # (como na prancha de referência; o meio da folha fica para a
+      # armadura). Só se uma seção alta não couber em 1:20 eles crescem para
+      # cima, sem passar das vistas.
       embaixo = [FX0 + 3, cx1, FY0 + 3, y_dir - 1]
-      faixa = [FX0 + 3, vx1, y_dir + 2, y_vis - 3]
+      alto = [FX0 + 3, cx1, FY0 + 3, y_vis - 3]
       e1 = escala_cortes_em(*embaixo)
-      e2 = escala_cortes_em(*faixa)
-      desenhar_cortes(*(e2 < e1 ? faixa : embaixo))
+      e2 = escala_cortes_em(*alto)
+      desenhar_cortes(*(e1 > ESCALA_CORTES_PADRAO && e2 < e1 ? alto : embaixo))
       self
     end
 
@@ -650,31 +652,44 @@ module DetalhamentoPM
       end
     end
 
-    # Maior escala em que os cortes cabem lado a lado na região
-    # (denominador; ESCALAS.last + 1 se não couberem).
+    ESCALA_CORTES_PADRAO = 20   # escala dos cortes na prancha de referência
+
+    # Largura (mm de papel) que cada corte ocupa na escala e: a seção, as
+    # cotas à esquerda (16) e uma folga (4). Com titulo = true, no mínimo a
+    # largura do título "CORTE X-X".
+    def larguras_cortes(e, titulo = false)
+      min = titulo ? larg('CORTE X-X', 3.0) + 10 : 0
+      caixas_cortes.map { |b| [(b[1] - b[0]) / e + 20, min].max }
+    end
+
+    # Maior escala em que os cortes cabem lado a lado na região, cada um com
+    # a largura de que precisa (denominador; ESCALAS.last + 1 se não couberem).
     def escala_cortes_em(x0, x1, y0, y1)
       return ESCALAS.last + 1 if @cortes.empty? || x1 <= x0 || y1 <= y0
-      slot = (x1 - x0) / @cortes.size
-      bbs = caixas_cortes
-      wmax = bbs.map { |b| b[1] - b[0] }.max
-      hmax = bbs.map { |b| b[3] - b[2] }.max
+      hmax = caixas_cortes.map { |b| b[3] - b[2] }.max
       ESCALAS.find do |e|
-        e >= ESCALA_MIN_CORTES && wmax / e + 20 <= slot && hmax / e + 26 <= y1 - y0
+        e >= ESCALA_MIN_CORTES && larguras_cortes(e).inject(:+) <= x1 - x0 &&
+          hmax / e + 26 <= y1 - y0
       end || ESCALAS.last + 1
     end
 
     def desenhar_cortes(x0, x1, y0, y1)
       return if @cortes.empty?
       n = @cortes.size
-      slot = (x1 - x0) / n
       bbs = caixas_cortes
       s = [escala_cortes_em(x0, x1, y0, y1), ESCALAS.last].min
       @escala_cortes = s
+      ws = larguras_cortes(s, true)
+      ws = larguras_cortes(s) if ws.inject(:+) > x1 - x0
+      # a sobra de largura é repartida, sem espalhar demais os cortes
+      extra = [[(x1 - x0 - ws.inject(:+)) / n, 0].max, 15].min
+      inicio = [x0]
+      ws.each { |w| inicio << inicio.last + w + extra }
 
       @cortes.each_with_index do |c, k|
         amin, amax, bmin, bmax = bbs[k]
-        ox = x0 + k * slot + 16
-        oy = y0 + 13
+        ox = inicio[k] + 16
+        oy = y0 + 13   # todos apoiados na margem inferior
         pp = lambda { |q| [ox + (q[0] - amin) / s, oy + (q[1] - bmin) / s] }
         c[:segs].each { |a, b| pa = pp.call(a); pb = pp.call(b); l(pa[0], pa[1], pb[0], pb[1], 'CONTORNO') }
         G.varredura(c[:segs], 1.5 * s, 45).each do |a, b|
