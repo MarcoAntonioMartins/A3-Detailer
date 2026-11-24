@@ -82,13 +82,19 @@ module DetalhamentoPM
 
       # cortes: embaixo, à esquerda do carimbo, apoiados na margem inferior
       # (como na prancha de referência; o meio da folha fica para a
-      # armadura). Só se uma seção alta não couber em 1:20 eles crescem para
-      # cima, sem passar das vistas.
-      embaixo = [FX0 + 3, cx1, FY0 + 3, y_dir - 1]
-      alto = [FX0 + 3, cx1, FY0 + 3, y_vis - 3]
-      e1 = escala_cortes_em(*embaixo)
-      e2 = escala_cortes_em(*alto)
-      desenhar_cortes(*(e1 > ESCALA_CORTES_PADRAO && e2 < e1 ? alto : embaixo))
+      # armadura). Podem subir até 30 mm acima do carimbo se isso der uma
+      # escala maior (ex.: 1:15 -> 1:10); se nem assim couberem em 1:20,
+      # crescem até perto das vistas. Sempre apoiados embaixo.
+      teto = y_vis - 3
+      regioes = [0, 10, 20, 30].map { |d| [FX0 + 3, cx1, FY0 + 3, [y_dir - 1 + d, teto].min] }
+      escalas = regioes.map { |r| escala_cortes_em(*r) }
+      k = escalas.each_index.min_by { |i| [escalas[i], i] }
+      regiao = regioes[k]
+      if escalas[k] > ESCALA_CORTES_PADRAO
+        alto = [FX0 + 3, cx1, FY0 + 3, teto]
+        regiao = alto if escala_cortes_em(*alto) < escalas[k]
+      end
+      desenhar_cortes(*regiao)
       self
     end
 
@@ -344,14 +350,51 @@ module DetalhamentoPM
       yb + 19
     end
 
+    CHANFRO = 20.0   # mm reais: trechos de cota menores que isso são chanfros
+
+    # Tira das cadeias de cota os trechos pequenos dos chanfros (ex.: friso
+    # com chanfro de 1 cm: "8 / 1 / 8 / 1 / 32" vira "8 / 10 / 32", como na
+    # prancha de referência). De cada trecho pequeno fica o ponto que está na
+    # face externa da peça (a abertura do friso); o outro sai. As pontas da
+    # cadeia nunca saem. externo = lambda { |valor| true/false }.
+    def sem_chanfros(q, externo)
+      q = q.dup
+      loop do
+        i = (0...q.size - 1).find do |k|
+          next false unless q[k + 1] - q[k] < CHANFRO
+          ea = k.zero? || externo.call(q[k])
+          eb = k + 1 == q.size - 1 || externo.call(q[k + 1])
+          ea != eb
+        end
+        break unless i
+        ea = i.zero? || externo.call(q[i])
+        q.delete_at(ea ? i + 1 : i)
+      end
+      q
+    end
+
     # ------------------------------------------------------------ vistas
-    def info(vista, alt)
-      hs = @verts.map { |q| vista.proj(q)[0] }
-      vs = @verts.map { |q| vista.proj(q)[1] }
+    # eixo = índice da coordenada vertical da vista (@ia ou @ib).
+    def info(vista, alt, eixo)
+      proj = @verts.map { |q| vista.proj(q) }
+      hq = G.quebras(proj.map { |q| q[0] }, TOL)
+      # valor vertical na face externa: em alguma seção ao longo de L há um
+      # canto com esse valor na frente ou no fundo da seção (a abertura do
+      # friso), e não só no fundo do friso
+      kv = eixo == @ia ? 0 : 1
+      kp = 1 - kv
+      cantos = hq.each_cons(2).flat_map do |a, b|
+        next [] if b - a < TOL
+        segs = G.corte(@tris, @il, (a + b) / 2.0, @ia, @ib)
+        next [] if segs.empty?
+        ps = segs.flatten(1).map { |q| q[kp] }
+        G.cantos(segs).select { |q| (q[kp] - ps.min).abs <= TOL || (q[kp] - ps.max).abs <= TOL }
+      end
+      externo = lambda { |v| cantos.any? { |q| (q[kv] - v).abs <= TOL } }
       ip = @insertos.flat_map { |i| i[:arestas].flatten(1) }.map { |q| vista.proj(q) }
       {
-        hq: G.quebras(hs, TOL),
-        vq: G.quebras(vs, TOL),
+        hq: hq,
+        vq: sem_chanfros(G.quebras(proj.map { |q| q[1] }, TOL), externo),
         ptop: ip.empty? ? 0.0 : [ip.map { |q| q[1] }.max - alt, 0.0].max,
         pbot: ip.empty? ? 0.0 : [-ip.map { |q| q[1] }.min, 0.0].max
       }
@@ -435,8 +478,8 @@ module DetalhamentoPM
 
     def vistas(x0, x1, y0, y1)
       tit_sup, tit_lat = titulos_vistas
-      sup = info(@vs, @A)
-      lat = info(@vl, @B)
+      sup = info(@vs, @A, @ia)
+      lat = info(@vl, @B, @ib)
       ins = centros_insertos(@vl)
       sup_rows = cadeia?(sup[:hq]) ? 2 : 1
       lat_rows = (cadeia?(lat[:hq]) ? 1 : 0) + (ins.empty? ? 0 : 1) + 1
@@ -703,8 +746,11 @@ module DetalhamentoPM
         txt("ESCALA: 1:#{s}", ox - 6, oy + h + 5, 2.0)
 
         pts = G.cantos(c[:segs])
-        qa = G.quebras(pts.map { |q| q[0] }, TOL)
-        qb = G.quebras(pts.map { |q| q[1] }, TOL)
+        # na seção, a face externa é o contorno da caixa da seção
+        ext_a = lambda { |v| pts.any? { |q| (q[0] - v).abs <= TOL && ((q[1] - bmin).abs <= TOL || (q[1] - bmax).abs <= TOL) } }
+        ext_b = lambda { |v| pts.any? { |q| (q[1] - v).abs <= TOL && ((q[0] - amin).abs <= TOL || (q[0] - amax).abs <= TOL) } }
+        qa = sem_chanfros(G.quebras(pts.map { |q| q[0] }, TOL), ext_a)
+        qb = sem_chanfros(G.quebras(pts.map { |q| q[1] }, TOL), ext_b)
         fx = lambda { |v| ox + (v - amin) / s }
         fy = lambda { |v| oy + (v - bmin) / s }
         lin = 0

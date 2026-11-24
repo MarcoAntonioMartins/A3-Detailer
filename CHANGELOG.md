@@ -3,6 +3,16 @@
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.3.5] - 2026-11-24
+### Alterado
+- Chanfros pequenos (menos de 2 cm) saem das cadeias de cotas das vistas e dos
+  cortes: o friso é cotado pela abertura na face externa, como na prancha de
+  referência ("8 / 1 / 8 / 1 / 32" vira "8 / 10 / 32"). O chanfro continua
+  desenhado.
+- Escala dos cortes: eles podem subir até 30 mm acima do carimbo, sempre
+  apoiados na margem inferior, quando isso dá uma escala maior (PPF04 de
+  25x50: 1:15 -> 1:10).
+
 ## [0.3.4] - 2026-11-24
 ### Corrigido
 - Pilares com mais de um console: cada console ou saliência ganha o seu corte,

@@ -110,6 +110,19 @@ esc = pr4.send(:escolher_cortes, unicos).map { |u| u[:sig] }
 confere('escolha de cortes: máx. 6, com o fuste e os dois consoles',
         esc.size == 6 && ([400, 106, 107] - esc).empty?)
 
+# PPF04 de 25x50 com frisos chanfrados (prancha real de 24/11/2026)
+cfg1 = Apoio.cfg(revisoes: ['00 - EMISSÃO INICIAL'], revisao: '00')
+pf = Prancha.new(Apoio.ppf04_friso, cfg1)
+pf.gerar(File.join(SAIDA, pf.nome_arquivo + '.pdf'))
+gf = Apoio::Grava.new
+Prancha.new(Apoio.ppf04_friso, cfg1).desenhar(gf)
+cf = gf.cotas.map { |t| t[:s] }
+confere('PPF04B: chanfros de 1 cm fora das cotas (nenhum "1")', !cf.include?('1'))
+confere('PPF04B: friso cotado pela abertura (10) nos 3 cortes e na vista lateral',
+        cf.count('10') >= 4)
+confere('PPF04B: cortes em 1:10, embaixo', pf.escala_cortes == 10 && titulos_embaixo.call(gf))
+confere('PPF04B: textos sem sobreposição', gf.sobrepostos.empty?)
+
 confere('LAJE09: recortes reais continuam (dente e recorte D)',
         Prancha.new(laje, Apoio.cfg).desenhar(Apoio::Grava.new).recortes.flatten(1).size >= 3)
 

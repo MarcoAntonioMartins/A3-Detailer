@@ -85,6 +85,22 @@ module Apoio
       tris: tris, arestas: arestas, insertos: [] }
   end
 
+  # Pilar 25x50x998,5 parecido com o PPF04 gerado em 24/11/2026: frisos de
+  # 10 cm com chanfro de 1 cm (degrau de 1 cm como aproximação), num lado a
+  # partir de 119 cm e nos dois lados a partir de 621 cm, e rebaixo de 20 cm
+  # no topo. x = largura 25, y = altura 50, z = comprimento.
+  def ppf04_friso
+    l = 9985.0
+    vazias = [[-1, 251, 300, 501, 8710, l + 1],      # rebaixo do topo
+              [-1, 10, 80, 180, 1190, l + 1],        # friso esquerdo: chanfro
+              [-1, 50, 90, 170, 1190, l + 1],        #   e fundo
+              [240, 251, 80, 180, 6210, l + 1],      # friso direito
+              [200, 251, 90, 170, 6210, l + 1]]
+    tris, arestas = malha([[0, 250, 0, 500, 0, l]], vazias)
+    { nome: 'PPF04B', tag: '2. Pilares', tipo: 'PILAR', tipo_plural: 'PILARES', qtd: 1,
+      tris: tris, arestas: arestas, insertos: [] }
+  end
+
   # Retângulo de inserto (só arestas) no plano z = cte.
   def placa_z(x0, x1, y0, y1, z)
     pts = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]]
