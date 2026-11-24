@@ -10,6 +10,8 @@
 #
 # cfg = { obra:, local:, prefixo:, codigo:, revisao:, revisoes: [...],
 #         data:, fck:, peso_esp:, fonte: }
+require File.join(File.dirname(__FILE__), 'armadura')
+
 module DetalhamentoPM
   class Prancha
     ESCALAS = [5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 125, 150, 200, 250,
@@ -24,7 +26,8 @@ module DetalhamentoPM
     MAX_CADEIA = 25
     TOL = 5.0          # mm reais: pontos de cota mais próximos que isso se unem
 
-    attr_reader :escala_vistas, :escala_cortes, :cortes, :recortes
+    attr_reader :escala_vistas, :escala_cortes, :cortes, :recortes, :peso_aco, :resumo_aco,
+                :escala_formas, :linhas_cortes
 
     def initialize(peca, cfg)
       @p = peca
@@ -60,32 +63,62 @@ module DetalhamentoPM
       @cortes = calcular_cortes
       iso = calcular_iso
 
+      # com armadura, o quadro "Resumo de aço" fica embaixo, encostado no
+      # carimbo (como na referência), e empurra o modelo 3D e os cortes para
+      # a esquerda; o 3D deitado (lajes, vigas) fica mais estreito.
       col = [FX1 - 33, FX1 - 3, y_dir + 4, FY1 - 4]
       blx = [FX1 - CW - 70, FX1 - CW - 4, FY0 + 4, y_dir - 2]
       k_col = fator(iso, col)
       k_blx = fator(iso, blx)
       na_coluna = k_col >= k_blx
-      if na_coluna
+      unless @arm.empty?
+        tab_w = TAB_ACO_W + 3
+        blx = [FX1 - CW - 4 - tab_w - 45, FX1 - CW - 4 - tab_w, FY0 + 4, y_dir - 2]
+        k_blx = fator(iso, blx)
+      end
+      tab_w ||= 0
+      # a faixa da armadura (abaixo das vistas) entra na conta da escala
+      reserva = @arm.empty? ? nil : lambda { |e| altura_armadura(e) + 4 }
+      # peças curtas (ou em escala pequena) deixam espaço à direita das
+      # vistas: o 3D deitado vai para lá e os cortes ficam com a parte de baixo
+      dir = nil
+      unless na_coluna
+        s0 = escala_vistas_em(FX0 + 17, FX1 - 3, y_dir + 3, FY1 - 2, reserva)
+        caixa = [FX0 + 17 + @L / s0 + 8, FX1 - 3, y_dir + 4, FY1 - 4]
+        dir = caixa if caixa[1] - caixa[0] >= 45 && fator(iso, caixa) >= k_blx
+      end
+      if dir
+        desenhar_iso(iso, dir, fator(iso, dir))
+        vx1 = dir[0] - 4
+        cx1 = FX1 - CW - 4 - tab_w
+      elsif na_coluna
         # a coluna fica só da largura do desenho 3D (peças em pé são finas);
         # o que sobra vai para as vistas
         larg_col = [iso[:w] * k_col, larg('MODELO 3D', 2.2) + 1].max
         col[0] = [col[1] - larg_col, col[0]].max
         desenhar_iso(iso, col, k_col)
         vx1 = col[0] - 4
-        cx1 = FX1 - CW - 4
+        cx1 = FX1 - CW - 4 - tab_w
       else
         desenhar_iso(iso, blx, k_blx)
         vx1 = FX1 - 3
         cx1 = blx[0] - 3
       end
-      y_vis = vistas(FX0 + 17, vx1, y_dir + 3, FY1 - 2)
+      y_vis = vistas(FX0 + 17, vx1, y_dir + 3, FY1 - 2, reserva)
+      teto = y_vis - 3
+      unless @arm.empty?
+        h_arm = altura_armadura(@escala_vistas)
+        desenhar_armadura(FX0 + 17, teto - h_arm, teto, @escala_vistas)
+        teto = [teto - h_arm - 4, y_dir - 1].max
+        tx1 = FX1 - CW - 3
+        tabela_aco_e_formas(tx1 - TAB_ACO_W, tx1, FY0, [y_dir + 29, teto].min)
+      end
 
       # cortes: embaixo, à esquerda do carimbo, apoiados na margem inferior
       # (como na prancha de referência; o meio da folha fica para a
       # armadura). Podem subir até 30 mm acima do carimbo se isso der uma
       # escala maior (ex.: 1:15 -> 1:10); se nem assim couberem em 1:20,
-      # crescem até perto das vistas. Sempre apoiados embaixo.
-      teto = y_vis - 3
+      # crescem até perto das vistas (ou da armadura). Sempre apoiados embaixo.
       regioes = [0, 10, 20, 30].map { |d| [FX0 + 3, cx1, FY0 + 3, [y_dir - 1 + d, teto].min] }
       escalas = regioes.map { |r| escala_cortes_em(*r) }
       k = escalas.each_index.min_by { |i| [escalas[i], i] }
@@ -122,6 +155,9 @@ module DetalhamentoPM
       @vi = G::Vista.new([1.0, -1.0, 0.0], [1.0, 1.0, 2.0]) # isométrica
       @verts = @tris.flatten(1) + @arestas.flatten(1)
       @vol = @p[:volume_m3] || G.volume(@tris) / 1e9
+      @arm = Array(@p[:armadura])
+      @massa_aco = (@c[:massa_aco] || Armadura::MASSA_ACO).to_f
+      @resumo_aco, @peso_aco = @arm.empty? ? [[], 0.0] : Armadura.resumo(@arm, @massa_aco)
     end
 
     # ------------------------------------------------------------ primitivas
@@ -329,6 +365,12 @@ module DetalhamentoPM
       peso = @vol * @c[:peso_esp].to_f
       vals = [@p[:nome], fmt_cm(@A), fmt_cm(@B), fmt_cm(@L), @p[:qtd].to_s,
               fmt2(@vol), fmt2(@vol * @p[:qtd].to_i), fmt2(peso), @c[:fck].to_s]
+      unless @arm.empty?
+        # taxa de aço (kg/m³) entre o peso e o fck, como na referência
+        larguras = [20, 17, 17, 20, 12, 22, 22, 20, 22, 18]
+        cab.insert(8, ['Taxa de aço', '(kg/m³)'])
+        vals.insert(8, fmt2(@vol > 0 ? @peso_aco / @vol : 0))
+      end
       rect(x0, yb, x1, yb + 19)
       l(x0, yb + 5, x1, yb + 5)
       l(x0, yb + 14, x1, yb + 14)
@@ -476,19 +518,42 @@ module DetalhamentoPM
       end
     end
 
-    def vistas(x0, x1, y0, y1)
-      tit_sup, tit_lat = titulos_vistas
-      sup = info(@vs, @A, @ia)
-      lat = info(@vl, @B, @ib)
-      ins = centros_insertos(@vl)
-      sup_rows = cadeia?(sup[:hq]) ? 2 : 1
-      lat_rows = (cadeia?(lat[:hq]) ? 1 : 0) + (ins.empty? ? 0 : 1) + 1
+    # Cotas e quebras das duas vistas (calculadas uma vez só).
+    def dados_vistas
+      @dados_vistas ||= { sup: info(@vs, @A, @ia), lat: info(@vl, @B, @ib), ins: centros_insertos(@vl) }
+    end
 
-      altura = lambda do |s|
-        (15 + sup_rows * ROW + 2) + (sup[:ptop] + @A + sup[:pbot]) / s + 6 +
-          (5 + lat_rows * ROW + 2 + 8) + (lat[:ptop] + @B + lat[:pbot]) / s + 9
-      end
-      s = ESCALAS.find { |e| @L / e <= x1 - x0 && altura.call(e) <= y1 - y0 } || ESCALAS.last
+    def linhas_cota_vistas
+      d = dados_vistas
+      [cadeia?(d[:sup][:hq]) ? 2 : 1,
+       (cadeia?(d[:lat][:hq]) ? 1 : 0) + (d[:ins].empty? ? 0 : 1) + 1]
+    end
+
+    # Altura (mm de papel) das duas vistas com cotas na escala s.
+    def altura_vistas(s)
+      sup = dados_vistas[:sup]
+      lat = dados_vistas[:lat]
+      sup_rows, lat_rows = linhas_cota_vistas
+      (15 + sup_rows * ROW + 2) + (sup[:ptop] + @A + sup[:pbot]) / s + 6 +
+        (5 + lat_rows * ROW + 2 + 8) + (lat[:ptop] + @B + lat[:pbot]) / s + 9
+    end
+
+    # Maior escala em que as vistas (e a reserva abaixo delas) cabem.
+    def escala_vistas_em(x0, x1, y0, y1, reserva = nil)
+      ESCALAS.find do |e|
+        @L / e <= x1 - x0 && altura_vistas(e) + (reserva ? reserva.call(e) : 0) <= y1 - y0
+      end || ESCALAS.last
+    end
+
+    # reserva = lambda { |escala| altura em mm } que precisa sobrar abaixo das
+    # vistas (faixa da armadura), ou nil.
+    def vistas(x0, x1, y0, y1, reserva = nil)
+      tit_sup, tit_lat = titulos_vistas
+      sup = dados_vistas[:sup]
+      lat = dados_vistas[:lat]
+      ins = dados_vistas[:ins]
+      sup_rows, lat_rows = linhas_cota_vistas
+      s = escala_vistas_em(x0, x1, y0, y1, reserva)
       @escala_vistas = s
 
       # -- vista superior
@@ -532,9 +597,15 @@ module DetalhamentoPM
       ybot - 7   # ponto mais baixo usado pelas vistas
     end
 
+    # Arestas visíveis e ocultas da vista (guardadas: a vista lateral é
+    # usada de novo na faixa da armadura).
+    def classificar_vista(vista, s)
+      (@classif ||= {})[[vista.object_id, s]] ||=
+        G.classificar(@arestas, vista, G::Oclusao.new(@tris, vista), 0.8 * s)
+    end
+
     def desenhar_vista(vista, ox, oy, s)
-      ocl = G::Oclusao.new(@tris, vista)
-      vis, hid = G.classificar(@arestas, vista, ocl, 0.8 * s)
+      vis, hid = classificar_vista(vista, s)
       pp = lambda { |q| [ox + q[0] / s, oy + q[1] / s] }
       vis.each { |a, b| pa = pp.call(a); pb = pp.call(b); l(pa[0], pa[1], pb[0], pb[1], 'CONTORNO') }
       hid.each { |a, b| pa = pp.call(a); pb = pp.call(b); l(pa[0], pa[1], pb[0], pb[1], 'OCULTO') }
@@ -705,67 +776,308 @@ module DetalhamentoPM
       caixas_cortes.map { |b| [(b[1] - b[0]) / e + 20, min].max }
     end
 
-    # Maior escala em que os cortes cabem lado a lado na região, cada um com
-    # a largura de que precisa (denominador; ESCALAS.last + 1 se não couberem).
+    # Arranjos possíveis dos cortes: uma linha, ou duas (A, B, C em cima e o
+    # resto embaixo). Cada arranjo é uma lista de linhas (de cima para baixo)
+    # com os índices dos cortes.
+    def arranjos_cortes
+      idx = (0...@cortes.size).to_a
+      res = [[idx]]
+      res << [idx[0, (idx.size + 1) / 2], idx[((idx.size + 1) / 2)..-1]] if idx.size >= 2
+      res
+    end
+
+    def altura_linha_cortes(ln, e)
+      bbs = caixas_cortes
+      ln.map { |k| bbs[k][3] - bbs[k][2] }.max / e + 26
+    end
+
+    def cabem_cortes?(e, linhas, larg_disp, alt_disp)
+      ws = larguras_cortes(e)
+      linhas.inject(0.0) { |s, ln| s + altura_linha_cortes(ln, e) } <= alt_disp &&
+        linhas.all? { |ln| ln.map { |k| ws[k] }.inject(:+) <= larg_disp }
+    end
+
+    # Escala e arranjo dos cortes na região: [denominador, linhas]. Uma linha
+    # só (como na referência) sempre que couber em 1:25; senão, o arranjo com
+    # a maior escala. Denominador ESCALAS.last + 1 se não couberem.
+    def layout_cortes(x0, x1, y0, y1)
+      return [ESCALAS.last + 1, arranjos_cortes.first] if @cortes.empty? || x1 <= x0 || y1 <= y0
+      opcoes = arranjos_cortes.map do |linhas|
+        e = ESCALAS.find { |x| x >= ESCALA_MIN_CORTES && cabem_cortes?(x, linhas, x1 - x0, y1 - y0) }
+        [e || ESCALAS.last + 1, linhas]
+      end
+      return opcoes.first if opcoes.first[0] <= 25
+      opcoes.min_by { |e, linhas| [e, linhas.size] }
+    end
+
     def escala_cortes_em(x0, x1, y0, y1)
-      return ESCALAS.last + 1 if @cortes.empty? || x1 <= x0 || y1 <= y0
-      hmax = caixas_cortes.map { |b| b[3] - b[2] }.max
-      ESCALAS.find do |e|
-        e >= ESCALA_MIN_CORTES && larguras_cortes(e).inject(:+) <= x1 - x0 &&
-          hmax / e + 26 <= y1 - y0
-      end || ESCALAS.last + 1
+      layout_cortes(x0, x1, y0, y1)[0]
     end
 
     def desenhar_cortes(x0, x1, y0, y1)
       return if @cortes.empty?
-      n = @cortes.size
-      bbs = caixas_cortes
-      s = [escala_cortes_em(x0, x1, y0, y1), ESCALAS.last].min
+      s, linhas = layout_cortes(x0, x1, y0, y1)
+      s = [s, ESCALAS.last].min
       @escala_cortes = s
-      ws = larguras_cortes(s, true)
-      ws = larguras_cortes(s) if ws.inject(:+) > x1 - x0
-      # a sobra de largura é repartida, sem espalhar demais os cortes
-      extra = [[(x1 - x0 - ws.inject(:+)) / n, 0].max, 15].min
-      inicio = [x0]
-      ws.each { |w| inicio << inicio.last + w + extra }
-
-      @cortes.each_with_index do |c, k|
-        amin, amax, bmin, bmax = bbs[k]
-        ox = inicio[k] + 16
-        oy = y0 + 13   # todos apoiados na margem inferior
-        pp = lambda { |q| [ox + (q[0] - amin) / s, oy + (q[1] - bmin) / s] }
-        c[:segs].each { |a, b| pa = pp.call(a); pb = pp.call(b); l(pa[0], pa[1], pb[0], pb[1], 'CONTORNO') }
-        G.varredura(c[:segs], 1.5 * s, 45).each do |a, b|
-          pa = pp.call(a)
-          pb = pp.call(b)
-          l(pa[0], pa[1], pb[0], pb[1], 'HACHURA')
+      @linhas_cortes = linhas.size
+      bbs = caixas_cortes
+      ws_tit = larguras_cortes(s, true)
+      ws_min = larguras_cortes(s)
+      alturas = linhas.map { |ln| altura_linha_cortes(ln, s) }
+      linhas.each_with_index do |ln, r|
+        # a última linha fica apoiada na margem inferior; as outras, em cima
+        base = y0 + alturas[(r + 1)..-1].inject(0.0, :+)
+        ws = ln.map { |k| ws_tit[k] }
+        ws = ln.map { |k| ws_min[k] } if ws.inject(:+) > x1 - x0
+        # a sobra de largura é repartida, sem espalhar demais os cortes
+        extra = [[(x1 - x0 - ws.inject(:+)) / ln.size, 0].max, 15].min
+        x = x0
+        ln.each_with_index do |k, j|
+          desenhar_corte(@cortes[k], bbs[k], x + 16, base + 13, s)
+          x += ws[j] + extra
         end
-        w = (amax - amin) / s
-        h = (bmax - bmin) / s
-        txt("CORTE #{c[:letra]}-#{c[:letra]}", ox - 6, oy + h + 9, 3.0)
-        txt("ESCALA: 1:#{s}", ox - 6, oy + h + 5, 2.0)
-
-        pts = G.cantos(c[:segs])
-        # na seção, a face externa é o contorno da caixa da seção
-        ext_a = lambda { |v| pts.any? { |q| (q[0] - v).abs <= TOL && ((q[1] - bmin).abs <= TOL || (q[1] - bmax).abs <= TOL) } }
-        ext_b = lambda { |v| pts.any? { |q| (q[1] - v).abs <= TOL && ((q[0] - amin).abs <= TOL || (q[0] - amax).abs <= TOL) } }
-        qa = sem_chanfros(G.quebras(pts.map { |q| q[0] }, TOL), ext_a)
-        qb = sem_chanfros(G.quebras(pts.map { |q| q[1] }, TOL), ext_b)
-        fx = lambda { |v| ox + (v - amin) / s }
-        fy = lambda { |v| oy + (v - bmin) / s }
-        lin = 0
-        if cadeia?(qa)
-          cadeia_h(qa.each_cons(2).map { |a, b| [fx.call(a), fx.call(b), b - a] }, oy, oy - 4)
-          lin = 1
-        end
-        cota_h(ox, ox + w, oy, oy - 4 - lin * ROW, amax - amin)
-        col = 0
-        if cadeia?(qb)
-          cadeia_v(qb.each_cons(2).map { |a, b| [fy.call(a), fy.call(b), b - a] }, ox, ox - 4)
-          col = 1
-        end
-        cota_v(oy, oy + h, ox, ox - 4 - col * ROW, bmax - bmin)
       end
+    end
+
+    def desenhar_corte(c, bb, ox, oy, s)
+      amin, amax, bmin, bmax = bb
+      pp = lambda { |q| [ox + (q[0] - amin) / s, oy + (q[1] - bmin) / s] }
+      c[:segs].each { |a, b| pa = pp.call(a); pb = pp.call(b); l(pa[0], pa[1], pb[0], pb[1], 'CONTORNO') }
+      G.varredura(c[:segs], 1.5 * s, 45).each do |a, b|
+        pa = pp.call(a)
+        pb = pp.call(b)
+        l(pa[0], pa[1], pb[0], pb[1], 'HACHURA')
+      end
+      w = (amax - amin) / s
+      h = (bmax - bmin) / s
+      txt("CORTE #{c[:letra]}-#{c[:letra]}", ox - 6, oy + h + 9, 3.0)
+      txt("ESCALA: 1:#{s}", ox - 6, oy + h + 5, 2.0)
+
+      pts = G.cantos(c[:segs])
+      # na seção, a face externa é o contorno da caixa da seção
+      ext_a = lambda { |v| pts.any? { |q| (q[0] - v).abs <= TOL && ((q[1] - bmin).abs <= TOL || (q[1] - bmax).abs <= TOL) } }
+      ext_b = lambda { |v| pts.any? { |q| (q[1] - v).abs <= TOL && ((q[0] - amin).abs <= TOL || (q[0] - amax).abs <= TOL) } }
+      qa = sem_chanfros(G.quebras(pts.map { |q| q[0] }, TOL), ext_a)
+      qb = sem_chanfros(G.quebras(pts.map { |q| q[1] }, TOL), ext_b)
+      fx = lambda { |v| ox + (v - amin) / s }
+      fy = lambda { |v| oy + (v - bmin) / s }
+      lin = 0
+      if cadeia?(qa)
+        cadeia_h(qa.each_cons(2).map { |a, b| [fx.call(a), fx.call(b), b - a] }, oy, oy - 4)
+        lin = 1
+      end
+      cota_h(ox, ox + w, oy, oy - 4 - lin * ROW, amax - amin)
+      col = 0
+      if cadeia?(qb)
+        cadeia_v(qb.each_cons(2).map { |a, b| [fy.call(a), fy.call(b), b - a] }, ox, ox - 4)
+        col = 1
+      end
+      cota_v(oy, oy + h, ox, ox - 4 - col * ROW, bmax - bmin)
+    end
+
+    # ------------------------------------------------------------ armadura
+    TAB_ACO_W = 84.0                       # largura do quadro "Resumo de aço"
+    COLS_ACO = [12, 14, 10, 14, 16, 18].freeze
+    COBRIMENTO = 30.0                      # mm: recuo dos estribos no desenho
+    LINHA_BARRA = 8.0                      # mm de papel por barra longitudinal
+
+    def fmt_num(cm)
+      fmt_cm(cm * 10.0)
+    end
+
+    def grupos_estribos
+      @arm.select { |i| i[:tipo] == 'E' }.group_by { |i| [i[:ini], i[:fim]] }
+          .sort_by { |(a, b), _| [a, b] }
+    end
+
+    # Trechos de estribos em linhas de cota: trechos que se sobrepõem (ex.:
+    # estribos na peça toda e outros só no console) vão para linhas
+    # diferentes. Devolve [[grupo, ...], ...] (uma lista por linha).
+    def linhas_estribos
+      linhas = []
+      grupos_estribos.each do |g|
+        (a, b), = g
+        ln = linhas.find { |l2| l2.none? { |(c, d), _| a < d - 0.01 && b > c + 0.01 } }
+        ln ? ln << g : linhas << [g]
+      end
+      linhas
+    end
+
+    def altura_linha_estribos(ln)
+      4.0 + 3.0 * ln.map { |_, its| its.size }.max + 2.0
+    end
+
+    def longitudinais
+      @arm.select { |i| i[:tipo] == 'L' }.sort_by { |i| Armadura.ordem_pos(i[:pos]) }
+    end
+
+    # Altura (mm de papel) da faixa da armadura na escala s.
+    def altura_armadura(s)
+      h = 6 + @B / s + 1.5
+      linhas_estribos.each { |ln| h += altura_linha_estribos(ln) }
+      h + longitudinais.size * LINHA_BARRA + 2
+    end
+
+    # Posições (cm ao longo da peça) dos estribos de uma linha da planilha:
+    # centrados no trecho com o espaçamento dado, ou distribuídos por igual.
+    def posicoes_estribos(it)
+      n = it[:qtd].to_i
+      ini = it[:ini]
+      fim = it[:fim]
+      return [] if n < 1
+      return [(ini + fim) / 2.0] if n == 1
+      esp = it[:espac]
+      if esp && esp > 0 && (n - 1) * esp <= (fim - ini) + 0.01
+        x = ini + ((fim - ini) - (n - 1) * esp) / 2.0
+        (0...n).map { |k| x + k * esp }
+      else
+        (0...n).map { |k| ini + k * (fim - ini) / (n - 1).to_f }
+      end
+    end
+
+    def rotulo_barra(it)
+      "#{it[:qtd]} #{it[:pos]} Ø#{Armadura.fmt_bitola(it[:bitola])}mm C=#{fmt_num(it[:comp])}"
+    end
+
+    # Vista lateral com os estribos (como na referência) e, abaixo, cada barra
+    # longitudinal com comprimento, gancho e rótulo. INÍCIO/FIM da planilha
+    # são medidos a partir da ponta esquerda das vistas.
+    def desenhar_armadura(x0, y0, y1, s)
+      txt('ARMADURA', FX0 + 4, y1 - 3.5, 2.5)
+      oy = y1 - 6 - @B / s
+      fx = lambda { |cm| x0 + cm * 10.0 / s }
+      vis, = classificar_vista(@vl, s)
+      vis.each { |a, b| l(x0 + a[0] / s, oy + a[1] / s, x0 + b[0] / s, oy + b[1] / s, 'CARIMBO') }
+
+      # estribos: cada um da altura da seção onde está, menos o cobrimento
+      ge = grupos_estribos
+      ge.each do |_, its|
+        its.each do |it|
+          posicoes_estribos(it).each do |xc|
+            xm = [[xc * 10.0, 1.0].max, @L - 1.0].min
+            bs = G.corte(@tris, @il, xm, @ia, @ib).flatten(1).map { |q| q[1] }
+            b0, b1 = bs.empty? ? [0.0, @B] : [bs.min, bs.max]
+            next if b1 - b0 <= 2 * COBRIMENTO
+            l(fx.call(xc), oy + (b0 + COBRIMENTO) / s, fx.call(xc), oy + (b1 - COBRIMENTO) / s, 'ARMADURA')
+          end
+        end
+      end
+      # trechos dos estribos: cota e, abaixo, "48 N5 c/15"; trechos que se
+      # sobrepõem ficam em linhas de cota separadas
+      y = oy - 1.5
+      linhas_estribos.each do |ln|
+        yc = y - 4.0
+        cadeia_h(ln.map { |(a, b), _| [fx.call(a), fx.call(b), (b - a) * 10.0] }, oy, yc)
+        ln.each do |(a, b), its|
+          its.sort_by { |i| Armadura.ordem_pos(i[:pos]) }.each_with_index do |it, j|
+            t = "#{it[:qtd]} #{it[:pos]}" + (it[:espac] ? " c/#{fmt_num(it[:espac])}" : '')
+            txt(t, (fx.call(a) + fx.call(b)) / 2.0, yc - 4.0 - 3.0 * j, 1.8, 'TEXTO', 1)
+          end
+        end
+        y -= altura_linha_estribos(ln)
+      end
+
+      # barras longitudinais, uma por linha
+      longitudinais.each_with_index do |it, k|
+        yb = y - 3.5 - k * LINHA_BARRA
+        xa = fx.call(it[:ini])
+        xb = fx.call(it[:fim])
+        l(xa, yb, xb, yb, 'ARMADURA')
+        gancho = it[:comp] - (it[:fim] - it[:ini])
+        if gancho > 0.5
+          hg = [[gancho * 10.0 / s, 1.5].max, 4.0].min
+          l(xa, yb, xa, yb + hg, 'ARMADURA')
+          txt(fmt_num(gancho), xa - 0.8, yb + 0.2, 1.8, 'COTAS', 0, 90)
+        end
+        txt(fmt_num(it[:fim] - it[:ini]), (xa + xb) / 2.0, yb + 0.8, 2.0, 'COTAS', 1)
+        txt(rotulo_barra(it), (xa + xb) / 2.0, yb - 2.8, 1.9, 'TEXTO', 1)
+      end
+    end
+
+    def altura_tabela_aco
+      5 + 8 + 4 * @resumo_aco.size + 5
+    end
+
+    # Quadro "Resumo de aço" a partir de ybase, e as formas dos estribos logo
+    # acima dele (até ytopo).
+    def tabela_aco_e_formas(x0, x1, ybase, ytopo)
+      n = @resumo_aco.size
+      y0 = ybase
+      y1 = ybase + altura_tabela_aco
+      rect(x0, y0, x1, y1)
+      l(x0, y1 - 5, x1, y1 - 5)
+      txt('RESUMO DE AÇO', (x0 + x1) / 2.0, y1 - 3.8, 2.2, 'TEXTO', 1)
+      yh = y1 - 13
+      l(x0, yh, x1, yh)
+      l(x0, y0 + 5, x1, y0 + 5)
+      cab = [['POS.'], ['BITOLA', '(mm)'], ['QTD.'], ['COMP.', '(cm)'],
+             ['PESO UNIT.', '(kg)'], ['PESO TOTAL', '(kg)']]
+      x = x0
+      COLS_ACO.each_with_index do |w, k|
+        # a última divisória desce até embaixo (célula do total)
+        l(x, k == COLS_ACO.size - 1 ? y0 : y0 + 5, x, y1 - 5) if k > 0
+        cx = x + w / 2.0
+        if cab[k].size == 1
+          txt(cab[k][0], cx, yh + 3.2, 1.6, 'TEXTO', 1)
+        else
+          txt(cab[k][0], cx, yh + 4.6, 1.6, 'TEXTO', 1)
+          txt(cab[k][1], cx, yh + 1.8, 1.6, 'TEXTO', 1)
+        end
+        x += w
+      end
+      @resumo_aco.each_with_index do |g, k|
+        yl = yh - 4 * (k + 1)
+        l(x0, yl, x1, yl) if k < n - 1
+        vals = [g[:pos], Armadura.fmt_bitola(g[:bitola]), g[:qtd].to_s, fmt_num(g[:comp]),
+                fmt2(g[:peso_unit]), fmt2(g[:peso_total])]
+        x = x0
+        COLS_ACO.each_with_index do |w, c|
+          txt(vals[c], x + w / 2.0, yl + 1.2, 1.8, 'TEXTO', 1)
+          x += w
+        end
+      end
+      xt = x1 - COLS_ACO.last
+      txt('TOTAL (kg):', xt - 1.5, y0 + 1.6, 1.9, 'TEXTO', 2)
+      txt(fmt2(@peso_aco), xt + COLS_ACO.last / 2.0, y0 + 1.6, 1.9, 'TEXTO', 1)
+      formas_estribos(x0, x1, y1 + 3, ytopo)
+    end
+
+    # Formas dos estribos (retângulo largura x altura da coluna FORMA), lado
+    # a lado, numa escala comum que caiba na região.
+    def formas_estribos(x0, x1, y0, y1)
+      @escala_formas = nil
+      formas = {}
+      @arm.each { |it| formas[it[:pos]] ||= it if it[:tipo] == 'E' && it[:forma] }
+      return if formas.empty?
+      lista = formas.values.sort_by { |i| Armadura.ordem_pos(i[:pos]) }
+      qtd = Hash[@resumo_aco.map { |g| [g[:pos], g[:qtd]] }]
+      larg_f = lambda do |it, e|
+        [it[:forma][0] * 10.0 / e + 9, larg(rotulo_forma(it, qtd), 1.6) + 2].max
+      end
+      se = [10, 15, 20, 25, 30, 40, 50].find do |e|
+        lista.map { |it| larg_f.call(it, e) }.inject(:+) <= x1 - x0 &&
+          lista.map { |it| it[:forma][1] * 10.0 / e }.max + 15 <= y1 - y0
+      end
+      return unless se
+      @escala_formas = se
+      hmax = lista.map { |it| it[:forma][1] * 10.0 / se }.max
+      txt("ESTRIBOS - ESCALA 1:#{se}", x0, y0 + 5 + hmax + 5.5, 1.8)
+      x = x0
+      lista.each do |it|
+        bw = it[:forma][0] * 10.0 / se
+        bh = it[:forma][1] * 10.0 / se
+        ox = x + 6
+        oyf = y0 + 5
+        rect(ox, oyf, ox + bw, oyf + bh, 'ARMADURA')
+        cota_h(ox, ox + bw, oyf, oyf - 3, it[:forma][0] * 10.0)
+        cota_v(oyf, oyf + bh, ox, ox - 3, it[:forma][1] * 10.0)
+        txt(rotulo_forma(it, qtd), x + 1, oyf + bh + 1.5, 1.6, 'TEXTO')
+        x += larg_f.call(it, se)
+      end
+    end
+
+    def rotulo_forma(it, qtd)
+      "#{qtd[it[:pos]]} #{it[:pos]} Ø#{Armadura.fmt_bitola(it[:bitola])} C=#{fmt_num(it[:comp])}"
     end
 
     # ------------------------------------------------------------ 3D

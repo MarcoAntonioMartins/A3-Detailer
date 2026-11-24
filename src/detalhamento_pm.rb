@@ -10,7 +10,7 @@ module DetalhamentoPM
     ext.description = 'Gera pranchas A3 de formas em PDF (e DXF opcional) de cada peça pré-moldada: ' \
                       'vistas superior e lateral com linhas ocultas, cortes ' \
                       'automáticos, modelo 3D, resumo, revisões e carimbo.'
-    ext.version     = '0.3.5'
+    ext.version     = '0.4.0'
     ext.creator     = 'MarcoAntonioMartins'
     ext.copyright   = '2026 MarcoAntonioMartins'
     Sketchup.register_extension(ext, true)

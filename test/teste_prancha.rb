@@ -4,6 +4,7 @@ require_relative 'apoio'
 require File.join(SRC, 'geom')
 require File.join(SRC, 'dxf')
 require File.join(SRC, 'pdf')
+require File.join(SRC, 'armadura')
 require File.join(SRC, 'prancha')
 
 $falhas = 0

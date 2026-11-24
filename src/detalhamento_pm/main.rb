@@ -8,6 +8,7 @@ dir = File.dirname(__FILE__)
 require File.join(dir, 'geom')
 require File.join(dir, 'dxf')
 require File.join(dir, 'pdf')
+require File.join(dir, 'armadura')
 require File.join(dir, 'prancha')
 
 module DetalhamentoPM
@@ -33,6 +34,8 @@ module DetalhamentoPM
       ['data',     'Data (vazio = hoje)', ''],
       ['fck',      'Fck (MPa)', '40'],
       ['peso_esp', 'Peso específico do concreto (t/m³)', '2,5'],
+      ['armaduras', 'Planilha de armaduras (CSV; vazio = armaduras.csv na pasta do modelo)', ''],
+      ['massa_aco', 'Massa específica do aço (kg/m³)', '7850'],
       ['fonte',    'Fonte do texto no DXF', 'romans.shx']
     ].freeze
 
@@ -72,6 +75,8 @@ module DetalhamentoPM
         revisoes: v['revisoes'].split(';').map(&:strip).reject(&:empty?),
         data: v['data'].strip.empty? ? Time.now.strftime('%d/%m/%Y') : v['data'],
         fck: v['fck'], peso_esp: v['peso_esp'].tr(',', '.').to_f,
+        armaduras: v['armaduras'].strip.delete('"'),
+        massa_aco: (m = v['massa_aco'].tr(',', '.').to_f) > 0 ? m : Armadura::MASSA_ACO,
         fonte: v['fonte'].strip.empty? ? 'romans.shx' : v['fonte'].strip
       }
     end
@@ -194,6 +199,40 @@ module DetalhamentoPM
       tipos.values.sort_by { |t| [t[:tag], t[:nome]] }
     end
 
+    # Caminho da planilha de armaduras: o da configuração ou armaduras.csv
+    # na pasta do modelo. nil se não houver.
+    def self.caminho_armaduras(cfg, pasta_modelo)
+      c = cfg[:armaduras].to_s
+      return c unless c.empty?
+      return nil if pasta_modelo.to_s.empty?
+      p = File.join(pasta_modelo, 'armaduras.csv')
+      File.exist?(p) ? p : nil
+    end
+
+    # Lê a planilha e põe a armadura em cada tipo de peça (pelo nome).
+    # Devolve as mensagens para o usuário (vazio se não há planilha).
+    def self.anexar_armaduras(tipos, caminho)
+      return [] unless caminho
+      return ["Planilha de armaduras não encontrada: #{caminho}"] unless File.exist?(caminho)
+      dados, erros = Armadura.ler_arquivo(caminho)
+      msgs = erros.first(10).map { |e| "Armaduras: #{e}" }
+      com = 0
+      tipos.each do |t|
+        itens = dados[Armadura.chave_peca(t[:nome])]
+        next unless itens && !itens.empty?
+        t[:armadura] = itens
+        com += 1
+        msgs.concat(Armadura.avisos(itens).map { |a| "Armaduras: #{a}" })
+      end
+      nomes = tipos.map { |t| Armadura.chave_peca(t[:nome]) }
+      sobra = dados.keys - nomes
+      msgs << "Armaduras: #{com} de #{tipos.size} peça(s) com armadura (#{File.basename(caminho)})"
+      msgs << "Armaduras: peças da planilha que não estão no modelo: #{sobra.first(10).join(', ')}" unless sobra.empty?
+      msgs
+    rescue StandardError => e
+      ["Erro ao ler a planilha de armaduras: #{e.message}"]
+    end
+
     def self.pecas_do_modelo(selecao, cfg)
       model = Sketchup.active_model
       if selecao
@@ -223,12 +262,15 @@ module DetalhamentoPM
 
       Sketchup.status_text = 'Lendo as peças...'
       tipos = agrupar(pecas, cfg)
+      pasta_modelo = model.path.to_s.empty? ? nil : File.dirname(model.path)
+      avisos_arm = anexar_armaduras(tipos, caminho_armaduras(cfg, pasta_modelo))
       feitas, erros = gerar_arquivos(tipos, cfg, pasta)
       Sketchup.status_text = ''
 
       msg = "#{feitas.size} prancha(s) gerada(s) em:\n#{pasta}\n\n"
       msg += feitas.first(15).join("\n")
       msg += "\n..." if feitas.size > 15
+      msg += "\n\n#{avisos_arm.join("\n")}" unless avisos_arm.empty?
       msg += "\n\nNão foi possível gerar:\n#{erros.join("\n")}" unless erros.empty?
       msg += "\n\nAbrir a pasta?"
       if UI.messagebox(msg, MB_YESNO) == IDYES

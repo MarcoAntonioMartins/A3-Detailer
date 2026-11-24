@@ -17,6 +17,10 @@ Extensão para SketchUp que lê as peças de concreto pré-moldado de um modelo 
 - **Cortes automáticos** (A-A, B-B, C-C…) nos trechos onde a seção da peça muda,
   com hachura e cotas, marcados na vista lateral.
 - **Modelo 3D** isométrico.
+- **Armadura** (opcional, a partir de uma planilha CSV): vista com os estribos
+  por trecho ("48 N5 c/15"), barras longitudinais com comprimento, gancho e
+  rótulo ("2 N1 Ø16,0mm C=886"), formas dos estribos, quadro **Resumo de aço**
+  (peso por posição e total) e taxa de aço (kg/m³) no quadro resumo.
 - **Quadro resumo**: largura, altura, comprimento, quantidade, volume unitário e
   total (calculado pelo sólido real), peso e fck.
 - **Revisões** e **carimbo**: conteúdo, nome da peça, obra, local, arquivo,
@@ -60,6 +64,8 @@ próxima vez:
 | Revisão atual / Histórico | `01` / `00 - EMISSÃO INICIAL; 01 - ALTERAÇÃO…` |
 | Data | vazio = hoje |
 | Fck (MPa) / Peso específico (t/m³) | `40` / `2,5` |
+| Planilha de armaduras (CSV) | vazio = `armaduras.csv` na pasta do modelo |
+| Massa específica do aço (kg/m³) | `7850` (NBR 7480) |
 | Fonte do texto no DXF | `romans.shx` |
 
 ## Como o modelo deve estar organizado
@@ -76,12 +82,47 @@ próxima vez:
 - O desenho usa os **eixos do próprio componente**: o eixo mais comprido vira o
   comprimento da prancha.
 
+## Planilha de armaduras
+
+Uma planilha para a obra inteira, salva como **CSV separado por ponto e
+vírgula** (no Excel em português: *Salvar como › CSV (separado por vírgulas)*,
+que usa `;`). Vírgula decimal e acentos funcionam. Exemplo completo, com a
+armadura da prancha de referência PPF1: [docs/armaduras_exemplo.csv](docs/armaduras_exemplo.csv).
+
+```
+PEÇA;POS;BITOLA;QTD;COMP;TIPO;INÍCIO;FIM;ESPAC;FORMA
+PPF1;N1;16;2;886;L;0;866;;
+PPF1;N5;5;48;164;E;150;866;15;20x45
+```
+
+| Coluna | O que é |
+|---|---|
+| PEÇA | nome da peça no modelo (maiúsculas/minúsculas tanto faz) |
+| POS | posição: N1, N2… |
+| BITOLA | diâmetro em mm (`12,5`) |
+| QTD | quantidade por peça; nos estribos pode ficar vazia (calculada pelo trecho e espaçamento) |
+| COMP | comprimento de corte da barra, em cm (o "C=" da prancha) |
+| TIPO | `L` longitudinal ou `E` estribo (vazio: `E` se tiver espaçamento) |
+| INÍCIO / FIM | trecho ao longo da peça, em cm, medido da ponta esquerda das vistas. Na barra longitudinal, `COMP` − (`FIM` − `INÍCIO`) é desenhado como gancho |
+| ESPAC | espaçamento dos estribos, em cm |
+| FORMA | estribo: largura x altura em cm (`20x45`) |
+
+A mesma posição pode aparecer em várias linhas (estribos em trechos com
+espaçamentos diferentes): no resumo as quantidades são somadas. Ao gerar as
+pranchas, o plugin avisa linhas com erro e peças da planilha que não existem no
+modelo.
+
+O peso usa a massa específica configurada (padrão 7850 kg/m³, NBR 7480; a
+prancha de referência PPF1 usa cerca de 7800).
+
 ## Limitações conhecidas
 
-- **Armadura** (posições N1, N2…, resumo de aço) ainda não é gerada.
+- A armadura vem da planilha: o plugin **não calcula** armadura. As barras
+  longitudinais não aparecem nos cortes, e a forma do estribo é sempre um
+  retângulo (sem acompanhar frisos).
 - Superfícies curvas suavizadas aparecem só pelas arestas visíveis.
 - As cotas no DXF são linhas e textos, não cotas associativas do AutoCAD.
-- Os cortes são escolhidos automaticamente (até 4 por peça).
+- Os cortes são escolhidos automaticamente (até 6 por peça).
 
 > ⚠️ A extensão automatiza o desenho a partir do modelo. As pranchas devem ser
 > conferidas e assinadas pelo engenheiro responsável antes de ir para a fábrica.
@@ -93,7 +134,8 @@ src/
   detalhamento_pm.rb          carregador da extensão (versão fica aqui)
   detalhamento_pm/
     main.rb                   integração com o SketchUp: menus, janela, leitura das peças
-    prancha.rb                montagem da prancha A3 (vistas, cortes, cotas, carimbo)
+    prancha.rb                montagem da prancha A3 (vistas, cortes, cotas, armadura, carimbo)
+    armadura.rb               leitura da planilha de armaduras e resumo de aço
     geom.rb                   geometria: projeções, linhas ocultas, cortes, hachura, volume
     pdf.rb                    gravador de PDF vetorial
     dxf.rb                    gravador de DXF R12
@@ -106,7 +148,7 @@ O nome interno da extensão (pasta `detalhamento_pm` e módulo `DetalhamentoPM`)
 é mantido entre as versões, para que as atualizações substituam a versão
 instalada em vez de criar uma cópia.
 
-`geom.rb`, `prancha.rb`, `pdf.rb` e `dxf.rb` são Ruby puro: não dependem do
+`geom.rb`, `prancha.rb`, `armadura.rb`, `pdf.rb` e `dxf.rb` são Ruby puro: não dependem do
 SketchUp e podem ser testados em qualquer computador.
 
 ## Desenvolvimento

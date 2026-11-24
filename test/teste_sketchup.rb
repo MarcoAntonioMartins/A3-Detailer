@@ -44,5 +44,25 @@ confere('inserto separado do concreto', t[:insertos].map { |i| i[:nome] } == ['A
   confere("formato #{core::FORMATOS[f]} sem erros", erros.empty? && !feitas.empty?)
 end
 
+# planilha de armaduras
+require 'tmpdir'
+Dir.mktmpdir do |dir|
+  confere('sem planilha configurada nem armaduras.csv: sem armadura',
+          core.caminho_armaduras(cfg, dir).nil? && core.anexar_armaduras(tipos, nil).empty?)
+  arq = File.join(dir, 'armaduras.csv')
+  File.write(arq, "PEÇA;POS;BITOLA;QTD;COMP;TIPO;INÍCIO;FIM;ESPAC;FORMA\n" \
+                  "pv1;N1;12,5;4;300;L;0;300;;\nPV1;N2;5;;140;E;0;300;15;20x45\nPV9;N1;10;2;100;L;;;;\n")
+  confere('acha armaduras.csv na pasta do modelo', core.caminho_armaduras(cfg, dir) == arq)
+  msgs = core.anexar_armaduras(tipos, arq)
+  confere('armadura ligada à peça pelo nome (maiúsculas/minúsculas)', t[:armadura] && t[:armadura].size == 2)
+  confere('avisa peça da planilha que não está no modelo', msgs.any? { |m| m.include?('PV9') })
+  confere('massa do aço padrão 7850 kg/m³', cfg[:massa_aco] == 7850.0)
+  dir2 = File.join(SAIDA, 'formato_armadura')
+  Dir.mkdir(dir2) unless Dir.exist?(dir2)
+  feitas, erros = core.gerar_arquivos(tipos, cfg.merge(formato: 2), dir2)
+  confere('PDF e DXF com armadura sem erros', erros.empty? && !feitas.empty?)
+  confere('planilha inexistente é avisada', core.anexar_armaduras(tipos, File.join(dir, 'nao.csv')).first.include?('não encontrada'))
+end
+
 puts($falhas.zero? ? 'Todos os testes passaram.' : "#{$falhas} teste(s) falharam.")
 exit($falhas.zero? ? 0 : 1)

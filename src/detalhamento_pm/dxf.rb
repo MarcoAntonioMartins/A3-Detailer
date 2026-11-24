@@ -14,7 +14,8 @@ module DetalhamentoPM
       'HACHURA'  => [8, 'CONTINUOUS'],
       'INSERTOS' => [6, 'CONTINUOUS'],
       'CORTE'    => [1, 'CONTINUOUS'],
-      'MODELO3D' => [7, 'CONTINUOUS']
+      'MODELO3D' => [7, 'CONTINUOUS'],
+      'ARMADURA' => [1, 'CONTINUOUS']
     }.freeze
 
     def initialize(fonte = 'romans.shx')

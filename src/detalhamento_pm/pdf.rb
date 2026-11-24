@@ -19,7 +19,8 @@ module DetalhamentoPM
       'HACHURA'  => [[0.55, 0.55, 0.55], 0.10, nil],
       'INSERTOS' => [[0.85, 0, 0.85], 0.25, nil],
       'CORTE'    => [[0.85, 0, 0], 0.30, nil],
-      'MODELO3D' => [[0, 0, 0], 0.18, nil]
+      'MODELO3D' => [[0, 0, 0], 0.18, nil],
+      'ARMADURA' => [[0.8, 0, 0], 0.30, nil]
     }.freeze
 
     LARGURAS = [278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333,

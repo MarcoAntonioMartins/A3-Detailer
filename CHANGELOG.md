@@ -3,6 +3,28 @@
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.4.0] - 2026-11-24
+### Adicionado
+- **Armadura a partir de planilha CSV** (uma para a obra, coluna PEÇA; padrão
+  `armaduras.csv` na pasta do modelo). Formato no README e exemplo com a
+  armadura da prancha de referência em `docs/armaduras_exemplo.csv`.
+- Faixa **ARMADURA** abaixo das vistas, na mesma escala: estribos desenhados
+  em cada trecho, com cota e rótulo ("48 N5 c/15"); trechos que se sobrepõem
+  ficam em linhas separadas. Barras longitudinais uma por linha, com
+  comprimento, gancho e rótulo ("2 N1 Ø16,0mm C=886").
+- Quadro **Resumo de aço** (posição, bitola, quantidade, comprimento, peso
+  unitário e total) encostado no carimbo, formas dos estribos acima dele e
+  coluna **Taxa de aço (kg/m³)** no resumo da peça.
+- Configurações "Planilha de armaduras (CSV)" e "Massa específica do aço"
+  (padrão 7850 kg/m³). Avisos de linhas com erro e de peças que não estão no
+  modelo.
+- Camada `ARMADURA` no PDF e no DXF.
+### Alterado
+- Cortes em duas linhas quando uma linha só não couber em 1:25 (sempre
+  apoiados embaixo).
+- O modelo 3D de peças deitadas vai para a direita das vistas quando sobra
+  espaço ali, deixando a parte de baixo para os cortes.
+
 ## [0.3.5] - 2026-11-24
 ### Alterado
 - Chanfros pequenos (menos de 2 cm) saem das cadeias de cotas das vistas e dos
