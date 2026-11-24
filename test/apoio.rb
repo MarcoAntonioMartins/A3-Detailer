@@ -85,6 +85,45 @@ module Apoio
       tris: tris, arestas: arestas, insertos: [] }
   end
 
+  # Retângulo de inserto (só arestas) no plano z = cte.
+  def placa_z(x0, x1, y0, y1, z)
+    pts = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]]
+    (0...4).map { |k| [pts[k], pts[(k + 1) % 4]] }
+  end
+
+  # Retângulo de inserto (só arestas) no plano y = cte.
+  def placa_y(x0, x1, z0, z1, y)
+    pts = [[x0, y, z0], [x1, y, z0], [x1, y, z1], [x0, y, z1]]
+    (0...4).map { |k| [pts[k], pts[(k + 1) % 4]] }
+  end
+
+  # Pilar parecido com o PPF04 real (prancha de 12/11/2026): 1010 cm,
+  # fuste 40x40 com frisos, base de 83 cm com 30 cm de altura, console para
+  # cima (30 cm) e console lateral (25 cm), com neoprenes nos consoles.
+  # Em pé, como no modelo: z = comprimento, x = largura total 65,
+  # y = altura total 70 (montado deitado e girado no fim).
+  def ppf04
+    p = ppf04_deitado
+    gira = lambda { |q| [q[1], q[2], q[0]] }
+    p.merge(tris: p[:tris].map { |t| t.map(&gira) },
+            arestas: p[:arestas].map { |s| s.map(&gira) },
+            insertos: p[:insertos].map { |i| i.merge(arestas: i[:arestas].map { |s| s.map(&gira) }) })
+  end
+
+  def ppf04_deitado
+    tris, arestas = malha([[830, 10100, 0, 400, 0, 400],
+                           [0, 830, 0, 400, 100, 400],
+                           [5090, 5540, 0, 400, 400, 700],
+                           [5540, 5790, 400, 650, 100, 300]],
+                          [[1300, 10101, 170, 230, 350, 401],
+                           [1300, 10101, -1, 50, 80, 180],
+                           [1300, 10101, 350, 401, 80, 180]])
+    { nome: 'PPF04', tag: '2. Pilares', tipo: 'PILAR', tipo_plural: 'PILARES', qtd: 2,
+      tris: tris, arestas: arestas,
+      insertos: [{ nome: 'NP 15X25CM', arestas: placa_z(5290, 5540, 125, 275, 700) },
+                 { nome: 'NP 10X20CM', arestas: placa_y(5590, 5790, 150, 250, 650) }] }
+  end
+
   # Gravador que só guarda o que foi desenhado (para os testes).
   class Grava
     attr_reader :linhas, :textos
@@ -117,9 +156,40 @@ module Apoio
       end
     end
 
-    # Pares de textos de cota que se sobrepõem.
+    def rotulos
+      @textos.select { |t| t[:camada] == 'INSERTOS' }
+    end
+
+    # O segmento a-b corta o retângulo c? (Liang-Barsky)
+    def corta?(a, b, c)
+      t0 = 0.0
+      t1 = 1.0
+      dx = b[0] - a[0]
+      dy = b[1] - a[1]
+      [[-dx, a[0] - c[0]], [dx, c[2] - a[0]], [-dy, a[1] - c[1]], [dy, c[3] - a[1]]].each do |p, q|
+        if p.abs < 1e-12
+          return false if q < 0
+        else
+          r = q / p
+          p < 0 ? t0 = [t0, r].max : t1 = [t1, r].min
+          return false if t0 > t1
+        end
+      end
+      true
+    end
+
+    # Rótulos de inserto escritos em cima de arestas da peça.
+    def rotulos_sobre_peca
+      contorno = @linhas.select { |ln| ln[4] == 'CONTORNO' }
+      rotulos.select do |t|
+        c = caixa(t)
+        contorno.any? { |x1, y1, x2, y2, _| corta?([x1, y1], [x2, y2], c) }
+      end.map { |t| t[:s] }
+    end
+
+    # Pares de textos (cotas e rótulos de insertos) que se sobrepõem.
     def sobrepostos
-      cs = cotas
+      cs = cotas + rotulos
       res = []
       cs.each_with_index do |a, i|
         ca = caixa(a)

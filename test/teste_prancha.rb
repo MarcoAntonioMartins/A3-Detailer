@@ -59,6 +59,28 @@ Prancha.new(Apoio.ppf1, Apoio.cfg).desenhar(gp)
 confere('PILAR mantém VISTA SUPERIOR = L x A (em cima)',
         ty.call(gp, 'VISTA SUPERIOR') > ty.call(gp, 'VISTA LATERAL'))
 confere('PPF1: textos de cota sem sobreposição', gp.sobrepostos.empty?)
+confere('PPF1: rótulos das alças fora da peça', gp.rotulos_sobre_peca.empty?)
+
+# PPF04 simulado (pilar em pé com consoles, como a prancha real de 12/11/2026)
+p4 = Apoio.ppf04
+pr4 = Prancha.new(p4, Apoio.cfg)
+pr4.gerar(File.join(SAIDA, pr4.nome_arquivo + '.pdf'))
+g4 = Apoio::Grava.new
+pr4b = Prancha.new(p4, Apoio.cfg)
+pr4b.desenhar(g4)
+confere('PPF04: dimensões 65 x 70 x 1010', g4.textos.any? { |t| t[:s] == '1010' })
+confere('PPF04: vistas em 1:30 (eram 1:40 com a coluna 3D larga)', pr4.escala_vistas == 30)
+confere('PPF04: cortes em 1:20 ou maior', pr4.escala_cortes <= 20)
+confere('PPF04: console saliente não vira "recorte" no resto da peça',
+        pr4b.recortes.all?(&:empty?))
+confere('PPF04: rótulos dos neoprenes fora da peça', g4.rotulos_sobre_peca.empty?)
+puts "      sobre a peça: #{g4.rotulos_sobre_peca.inspect}" unless g4.rotulos_sobre_peca.empty?
+confere('PPF04: rótulos dos dois neoprenes',
+        %w[NP\ 15X25CM NP\ 10X20CM].all? { |n| g4.rotulos.any? { |t| t[:s] == n } })
+confere('PPF04: textos sem sobreposição', g4.sobrepostos.empty?)
+puts "      sobrepostos: #{g4.sobrepostos.inspect}" unless g4.sobrepostos.empty?
+confere('LAJE09: recortes reais continuam (dente e recorte D)',
+        Prancha.new(laje, Apoio.cfg).desenhar(Apoio::Grava.new).recortes.flatten(1).size >= 3)
 
 # PDF com várias páginas
 doc = PDF.new

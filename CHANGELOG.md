@@ -3,6 +3,20 @@
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.3.3] - 2026-11-24
+### Alterado
+- Layout ajustado pela prancha real do PPF04 e pela referência PPF1:
+  - a coluna do modelo 3D fica só da largura do desenho, e o espaço que sobra
+    vai para as vistas (PPF04 passou de 1:40 para 1:30, como na referência);
+  - os cortes vão para a faixa livre entre as vistas e o carimbo quando cabem
+    ali em escala maior; a escala dos cortes nunca passa de 1:10;
+  - rótulos de insertos ficam acima da peça, com linha de chamada até o
+    inserto, sem escrever sobre as arestas nem sobre marcas de corte e cotas.
+### Corrigido
+- Cotas locais de recorte: a referência é o topo que ocupa a maior parte do
+  comprimento. Um console saliente não transforma mais o resto da peça em
+  "rebaixo" (apareciam cotas de 25 e 30 com linhas de chamada soltas).
+
 ## [0.3.2] - 2026-11-24
 ### Corrigido
 - Cadeias de cotas não somem mais quando algum trecho é pequeno: todos os trechos

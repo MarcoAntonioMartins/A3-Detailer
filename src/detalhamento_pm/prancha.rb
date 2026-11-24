@@ -24,7 +24,7 @@ module DetalhamentoPM
     MAX_CADEIA = 25
     TOL = 5.0          # mm reais: pontos de cota mais próximos que isso se unem
 
-    attr_reader :escala_vistas, :escala_cortes, :cortes
+    attr_reader :escala_vistas, :escala_cortes, :cortes, :recortes
 
     def initialize(peca, cfg)
       @p = peca
@@ -53,7 +53,8 @@ module DetalhamentoPM
     # Desenha a prancha num gravador (DXF, página de PDF ou Saidas).
     def desenhar(saida)
       @d = saida
-      @ocupado = []   # caixas dos textos de cota já colocados
+      @ocupado = []   # caixas dos textos de cota e rótulos já colocados
+      @recortes = []  # recortes achados em cada vista (superior, lateral)
       folha
       y_dir = carimbo_e_tabelas
       @cortes = calcular_cortes
@@ -65,6 +66,10 @@ module DetalhamentoPM
       k_blx = fator(iso, blx)
       na_coluna = k_col >= k_blx
       if na_coluna
+        # a coluna fica só da largura do desenho 3D (peças em pé são finas);
+        # o que sobra vai para as vistas
+        larg_col = [iso[:w] * k_col, larg('MODELO 3D', 2.2) + 1].max
+        col[0] = [col[1] - larg_col, col[0]].max
         desenhar_iso(iso, col, k_col)
         vx1 = col[0] - 4
         cx1 = FX1 - CW - 4
@@ -73,8 +78,15 @@ module DetalhamentoPM
         vx1 = FX1 - 3
         cx1 = blx[0] - 3
       end
-      vistas(FX0 + 17, vx1, y_dir + 3, FY1 - 2)
-      desenhar_cortes(FX0 + 3, cx1, FY0 + 3, y_dir - 1)
+      y_vis = vistas(FX0 + 17, vx1, y_dir + 3, FY1 - 2)
+
+      # cortes: no canto inferior esquerdo ou na faixa livre entre as vistas
+      # e o carimbo, onde couberem em escala maior
+      embaixo = [FX0 + 3, cx1, FY0 + 3, y_dir - 1]
+      faixa = [FX0 + 3, vx1, y_dir + 2, y_vis - 3]
+      e1 = escala_cortes_em(*embaixo)
+      e2 = escala_cortes_em(*faixa)
+      desenhar_cortes(*(e2 < e1 ? faixa : embaixo))
       self
     end
 
@@ -363,17 +375,27 @@ module DetalhamentoPM
     end
 
     # Recortes e rebaixos na borda superior da vista: trechos ao longo de L
-    # onde o topo da silhueta fica abaixo da altura total. eixo = índice da
-    # coordenada vertical da vista (@ia ou @ib). Devolve [[a, b, h], ...] (mm reais).
-    def recortes(eixo, alt, hq)
+    # onde o topo da silhueta fica abaixo do topo "normal" da peça, que é o
+    # nível que ocupa o maior comprimento (assim um console saliente não
+    # transforma o resto da peça em rebaixo). eixo = índice da coordenada
+    # vertical da vista (@ia ou @ib). Devolve [topo, [[a, b, h], ...]] (mm reais).
+    def achar_recortes(eixo, hq)
       k = eixo == @ia ? 0 : 1
-      res = []
+      perfil = []
       hq.each_cons(2) do |a, b|
         next if b - a < TOL
         segs = G.corte(@tris, @il, (a + b) / 2.0, @ia, @ib)
         next if segs.empty?
-        h = segs.flatten(1).map { |q| q[k] }.max
-        next unless h < alt - TOL
+        perfil << [a, b, segs.flatten(1).map { |q| q[k] }.max]
+      end
+      return [nil, []] if perfil.empty?
+      comp = Hash.new(0.0)
+      perfil.each { |a, b, h| comp[(h / TOL).round] += b - a }
+      topo = perfil.select { |_, _, h| (h / TOL).round == comp.max_by { |_, v| v }[0] }
+                   .map { |_, _, h| h }.max
+      res = []
+      perfil.each do |a, b, h|
+        next unless h < topo - TOL
         ult = res.last
         if ult && (ult[1] - a).abs < 1e-6 && (ult[2] - h).abs < TOL
           ult[1] = b
@@ -381,13 +403,16 @@ module DetalhamentoPM
           res << [a, b, h]
         end
       end
-      res
+      [topo, res]
     end
 
     # Cota vertical local com a profundidade de cada recorte, junto dele.
-    def cotas_recortes(eixo, alt, hq, ox, oy, s)
-      yt = oy + alt / s
-      recortes(eixo, alt, hq).each do |a, b, h|
+    def cotas_recortes(eixo, hq, ox, oy, s)
+      topo, lista = achar_recortes(eixo, hq)
+      (@recortes ||= []) << lista
+      return unless topo
+      yt = oy + topo / s
+      lista.each do |a, b, h|
         xa = ox + a / s
         xb = ox + b / s
         if a <= TOL
@@ -402,7 +427,7 @@ module DetalhamentoPM
           x = xa + (xb - xa) * 0.35
           xref = xa
         end
-        cota_v(oy + h / s, yt, xref, x, alt - h)
+        cota_v(oy + h / s, yt, xref, x, topo - h)
       end
     end
 
@@ -429,7 +454,7 @@ module DetalhamentoPM
       oy = topo - @A / s
       desenhar_vista(@vs, x0, oy, s)
       cotas_vista(sup, x0, oy, topo + sup[:ptop] / s, s, @A, [])
-      cotas_recortes(@ia, @A, sup[:hq], x0, oy, s)
+      cotas_recortes(@ia, sup[:hq], x0, oy, s)
       fundo = oy - sup[:pbot] / s
 
       # -- vista lateral (L x B; em lajes e placas é a vista superior)
@@ -438,8 +463,7 @@ module DetalhamentoPM
       topo = yt - 5 - (lat_rows * ROW + 2) - 8 - lat[:ptop] / s
       oy = topo - @B / s
       desenhar_vista(@vl, x0, oy, s)
-      rotulos_insertos(@vl, x0, oy, s)
-      # as marcas de corte ocupam espaço: os textos de cota desviam delas
+      # as marcas de corte ocupam espaço: rótulos e textos de cota desviam delas
       ytop = topo + lat[:ptop] / s
       ybot = oy - lat[:pbot] / s
       @cortes.each do |c|
@@ -447,8 +471,9 @@ module DetalhamentoPM
         @ocupado << [x - 2.5, ytop + 1, x + 0.8 + larg(c[:letra], 2.5), ytop + 6]
         @ocupado << [x - 2.5, ybot - 6, x + 0.8 + larg(c[:letra], 2.5), ybot - 1]
       end
+      rotulos_insertos(@vl, x0, oy, s, ytop)
       cotas_vista(lat, x0, oy, topo + lat[:ptop] / s + 8, s, @B, ins)
-      cotas_recortes(@ib, @B, lat[:hq], x0, oy, s)
+      cotas_recortes(@ib, lat[:hq], x0, oy, s)
 
       # marcas de corte
       @cortes.each do |c|
@@ -459,6 +484,7 @@ module DetalhamentoPM
           txt(c[:letra], x + 0.8, (ya + yb) / 2.0 - 1.2, 2.5, 'CORTE')
         end
       end
+      ybot - 7   # ponto mais baixo usado pelas vistas
     end
 
     def desenhar_vista(vista, ox, oy, s)
@@ -476,15 +502,37 @@ module DetalhamentoPM
       end
     end
 
-    def rotulos_insertos(vista, ox, oy, s)
+    # Rótulos dos insertos acima da peça (faixa de 8 mm entre o topo da vista
+    # e as cotas), com linha de chamada até o canto superior direito do
+    # inserto, como na prancha de referência. Não escreve sobre a peça.
+    def rotulos_insertos(vista, ox, oy, s, ytop)
       usados = []
+      th = 1.8
       @insertos.each do |i|
         pts = i[:arestas].flatten(1).map { |q| vista.proj(q) }
-        x = ox + pts.map { |q| q[0] }.max / s + 1.0
-        y = oy + pts.map { |q| q[1] }.max / s
-        next if usados.any? { |n, ux, uy| n == i[:nome] && (ux - x).abs < 1 && (uy - y).abs < 1 }
-        usados << [i[:nome], x, y]
-        txt(i[:nome].upcase, x, y - 1.0, 1.8, 'INSERTOS')
+        ax = ox + pts.map { |q| q[0] }.max / s
+        ay = oy + pts.map { |q| q[1] }.max / s
+        next if usados.any? { |n, ux, uy| n == i[:nome] && (ux - ax).abs < 1 && (uy - ay).abs < 1 }
+        usados << [i[:nome], ax, ay]
+        t = i[:nome].upcase
+        w = larg(t, th)
+        pos = nil
+        (0..20).each do |k|
+          [2.0, 4.5, 7.0].each do |dy|
+            bx = ax + 1.5 + k * 2.0
+            by = [ytop, ay].max + dy
+            cx = [bx, by, bx + w + 1.0, by + th + 0.6]
+            next unless livre?(cx)
+            pos = [bx, by, cx]
+            break
+          end
+          break if pos
+        end
+        bx, by, cx = pos || [ax + 1.5, [ytop, ay].max + 2.0, nil]
+        @ocupado << (cx || [bx, by, bx + w + 1.0, by + th + 0.6])
+        l(ax, ay, bx, by, 'INSERTOS')
+        l(bx, by, bx + w + 1.0, by, 'INSERTOS')
+        txt(t, bx + 0.5, by + 0.6, th, 'INSERTOS')
       end
     end
 
@@ -554,18 +602,35 @@ module DetalhamentoPM
       unicos
     end
 
-    def desenhar_cortes(x0, x1, y0, y1)
-      return if @cortes.empty?
-      n = @cortes.size
-      slot = (x1 - x0) / n
-      bbs = @cortes.map do |c|
+    ESCALA_MIN_CORTES = 10   # cortes nunca maiores que 1:10
+
+    def caixas_cortes
+      @cortes.map do |c|
         pts = c[:segs].flatten(1)
         [pts.map { |q| q[0] }.min, pts.map { |q| q[0] }.max,
          pts.map { |q| q[1] }.min, pts.map { |q| q[1] }.max]
       end
+    end
+
+    # Maior escala em que os cortes cabem lado a lado na região
+    # (denominador; ESCALAS.last + 1 se não couberem).
+    def escala_cortes_em(x0, x1, y0, y1)
+      return ESCALAS.last + 1 if @cortes.empty? || x1 <= x0 || y1 <= y0
+      slot = (x1 - x0) / @cortes.size
+      bbs = caixas_cortes
       wmax = bbs.map { |b| b[1] - b[0] }.max
       hmax = bbs.map { |b| b[3] - b[2] }.max
-      s = ESCALAS.find { |e| wmax / e + 20 <= slot && hmax / e + 26 <= y1 - y0 } || ESCALAS.last
+      ESCALAS.find do |e|
+        e >= ESCALA_MIN_CORTES && wmax / e + 20 <= slot && hmax / e + 26 <= y1 - y0
+      end || ESCALAS.last + 1
+    end
+
+    def desenhar_cortes(x0, x1, y0, y1)
+      return if @cortes.empty?
+      n = @cortes.size
+      slot = (x1 - x0) / n
+      bbs = caixas_cortes
+      s = [escala_cortes_em(x0, x1, y0, y1), ESCALAS.last].min
       @escala_cortes = s
 
       @cortes.each_with_index do |c, k|
