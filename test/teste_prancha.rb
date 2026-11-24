@@ -79,6 +79,30 @@ confere('PPF04: rótulos dos dois neoprenes',
         %w[NP\ 15X25CM NP\ 10X20CM].all? { |n| g4.rotulos.any? { |t| t[:s] == n } })
 confere('PPF04: textos sem sobreposição', g4.sobrepostos.empty?)
 puts "      sobrepostos: #{g4.sobrepostos.inspect}" unless g4.sobrepostos.empty?
+faixa = lambda { |c, k| v = c[:segs].flatten(1).map { |q| q[k] }; v.max - v.min }
+confere('PPF04: um corte mostra o console para cima (seção com 70 cm)',
+        pr4.cortes.any? { |c| faixa.call(c, 1) > 600 })
+confere('PPF04: um corte mostra o console lateral (seção com 65 cm)',
+        pr4.cortes.any? { |c| faixa.call(c, 0) > 600 })
+
+# Com mais seções do que vagas, os consoles curtos não podem ficar de fora.
+ret = lambda do |a0, a1, b0, b1|
+  [[[a0, b0], [a1, b0]], [[a1, b0], [a1, b1]], [[a1, b1], [a0, b1]], [[a0, b1], [a0, b0]]]
+end
+secoes = [[400, 0, 400, 0, 400, 9000],      # fuste (principal)
+          [100, 0, 400, 100, 400, 830],     # base
+          [101, 0, 400, 0, 400, 470],       # transições sem saliência
+          [102, 0, 400, 0, 400, 400], [103, 0, 400, 0, 400, 300],
+          [104, 0, 400, 0, 400, 200], [105, 0, 400, 0, 400, 150],
+          [106, 0, 400, 0, 700, 120],       # console para cima (curto)
+          [107, 0, 650, 0, 400, 100]]       # console lateral (o mais curto)
+unicos = secoes.each_with_index.map do |(id, a0, a1, b0, b1, comp), k|
+  { sig: id, pos: k * 1000.0, segs: ret.call(a0, a1, b0, b1), comp: comp }
+end
+esc = pr4.send(:escolher_cortes, unicos).map { |u| u[:sig] }
+confere('escolha de cortes: máx. 6, com o fuste e os dois consoles',
+        esc.size == 6 && ([400, 106, 107] - esc).empty?)
+
 confere('LAJE09: recortes reais continuam (dente e recorte D)',
         Prancha.new(laje, Apoio.cfg).desenhar(Apoio::Grava.new).recortes.flatten(1).size >= 3)
 

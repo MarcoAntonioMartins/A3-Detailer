@@ -3,6 +3,16 @@
 O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/)
 e as versões seguem o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.3.4] - 2026-11-24
+### Corrigido
+- Pilares com mais de um console: cada console ou saliência ganha o seu corte,
+  mesmo que seja curto. Antes, com o limite de 4 cortes, o console de cima do
+  PPF04 ficava sem corte e o D-D mostrava só o console lateral.
+### Alterado
+- Até 6 cortes por prancha (eram 4). Na escolha, a seção principal e um corte
+  por tipo de saliência entram primeiro; as vagas que sobram vão para as seções
+  mais compridas.
+
 ## [0.3.3] - 2026-11-24
 ### Alterado
 - Layout ajustado pela prancha real do PPF04 e pela referência PPF1:

@@ -597,9 +597,47 @@ module DetalhamentoPM
           unicos << it.dup
         end
       end
-      unicos = unicos.sort_by { |u| -u[:comp] }.first(4).sort_by { |u| u[:pos] } if unicos.size > 4
+      unicos = escolher_cortes(unicos) if unicos.size > MAX_CORTES
       unicos.each_with_index { |u, k| u[:letra] = ('A'.ord + k).chr }
       unicos
+    end
+
+    MAX_CORTES = 6
+
+    # Lados ([:a0, :a1, :b0, :b1]) em que a seção passa da seção principal
+    # (a mais comprida): consoles e outras saliências.
+    def saliencias(caixa, princ)
+      lados = []
+      lados << :a0 if caixa[0] < princ[0] - TOL
+      lados << :a1 if caixa[1] > princ[1] + TOL
+      lados << :b0 if caixa[2] < princ[2] - TOL
+      lados << :b1 if caixa[3] > princ[3] + TOL
+      lados
+    end
+
+    # Escolhe no máximo MAX_CORTES seções. A principal entra sempre e cada
+    # tipo de saliência (console para cima, console para o lado...) ganha o
+    # seu corte, mesmo que seja curto; as vagas que sobram vão para as
+    # seções mais compridas.
+    def escolher_cortes(unicos)
+      cx = lambda do |u|
+        pts = u[:segs].flatten(1)
+        [pts.map { |q| q[0] }.min, pts.map { |q| q[0] }.max,
+         pts.map { |q| q[1] }.min, pts.map { |q| q[1] }.max]
+      end
+      por_comp = unicos.sort_by { |u| -u[:comp] }
+      princ = por_comp.first
+      caixa_p = cx.call(princ)
+      escolha = [princ]
+      vistos = {}
+      por_comp.each do |u|
+        lados = saliencias(cx.call(u), caixa_p)
+        next if lados.empty? || vistos[lados]
+        vistos[lados] = true
+        escolha << u if escolha.size < MAX_CORTES
+      end
+      por_comp.each { |u| escolha << u if escolha.size < MAX_CORTES && !escolha.include?(u) }
+      escolha.sort_by { |u| u[:pos] }
     end
 
     ESCALA_MIN_CORTES = 10   # cortes nunca maiores que 1:10
